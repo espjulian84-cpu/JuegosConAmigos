@@ -381,7 +381,7 @@ function startLocal() {
   S.mode = 'local';
   S.room = {
     code: null, hostPid: me.pid, sel: GAMES[0].id, teamMode: false, teams: {}, opts: {}, gameId: null, seats: null, state: null, gameNo: 0,
-    players: [{ ...me, online: true }, { pid: 'L2', name: 'Jugador 2', avatar: AVATARS[1], online: true }],
+    players: [{ ...me, online: true }, { pid: 'B0' + randCode(3), name: 'Robotín', avatar: '🤖', online: true, bot: true }],
   };
   S.screen = 'lobby'; render();
 }
@@ -416,6 +416,7 @@ function stopRtLoop() { if (S.rtLoop) { clearInterval(S.rtLoop); S.rtLoop = null
 function onRoomUpdated() {
   const r = S.room;
   if (!r) return;
+  setTimeout(botTick, 0);
   if (r.teamDraw && r.teamDraw !== S.teamDrawSeen) { if (S.teamDrawSeen != null || S.mode === 'host' || S.mode === 'local') setTimeout(showTeamDraw, 50); S.teamDrawSeen = r.teamDraw; }
   const rg = r.gameId && r.state && getGame(r.gameId);
   if (rg && rg.realtime) {
@@ -487,10 +488,35 @@ function showTeamDraw() {
   d.onclick = () => d.remove();
 }
 
+const isBotSeat = (k) => { const r = S.room; const p = r && r.seats && r.players.find((x) => x.pid === r.seats[k]); return !!(p && p.bot); };
+
+// La máquina juega sola cuando le toca (modo "en este móvil")
+function botTick() {
+  const r = S.room;
+  if (S.mode !== 'local' || !r || !r.state || !r.gameId) return;
+  const g = getGame(r.gameId);
+  if (g.realtime || g.isOver(r.state)) return;
+  const t = g.turnOf(r.state);
+  if (t == null || !isBotSeat(t) || S.botV === r.state.v) return;
+  S.botV = r.state.v;
+  const wait = r.state.rollId === r.state.v ? 1900 : 1100;
+  setTimeout(() => {
+    const cur = S.room;
+    if (S.mode !== 'local' || !cur || cur.state !== r.state) return;
+    try { const err = doAction(t, g.bot(cur.state, t)); if (err) console.warn('máquina:', err); } catch (e) { console.error(e); }
+  }, wait);
+}
+
 function mySeat() {
   const r = S.room;
   if (!r || !r.seats) return null;
-  if (S.mode === 'local' || S.mode === 'demo') { const t = getGame(r.gameId).turnOf(r.state); return t == null ? (r.state.winner ?? 0) : t; }
+  if (S.mode === 'demo') { const t = getGame(r.gameId).turnOf(r.state); return t == null ? (r.state.winner ?? 0) : t; }
+  if (S.mode === 'local') {
+    const t = getGame(r.gameId).turnOf(r.state);
+    const humans = r.seats.map((pid, k) => k).filter((k) => !isBotSeat(k));
+    if (t != null && !isBotSeat(t)) { S.lastHuman = t; return t; }
+    return humans.includes(S.lastHuman) ? S.lastHuman : (humans[0] ?? 0);
+  }
   const i = r.seats.indexOf(me.pid);
   return i < 0 ? null : i;
 }
@@ -691,7 +717,7 @@ function lobbyHTML() {
   const players = r.players.map((p, i) => `
     <div class="lplayer ${p.online ? '' : 'off'}" style="--pc:${PLAYER_COLORS[i]}">
       ${local ? `<button class="lavatar" data-lavatar="${i}">${p.avatar}</button>` : `<span class="lavatar">${p.avatar}</span>`}
-      <div class="grow">${local ? `<input class="lname" data-lname="${i}" maxlength="16" value="${esc(p.name)}">` : `<b>${esc(p.name)}</b>${p.pid === r.hostPid ? ' 👑' : ''}${p.pid === me.pid ? ' <small>(tú)</small>' : ''}${p.v && r.hostV && p.v !== r.hostV ? `<div class="verwarn">⚠️ Tiene otra versión (${esc(p.v)}). ¡Actualizad todos a la misma!</div>` : ''}`}</div>
+      <div class="grow">${local && p.bot ? `<b>${esc(p.name)}</b> <small>(máquina)</small>` : local ? `<input class="lname" data-lname="${i}" maxlength="16" value="${esc(p.name)}">` : `<b>${esc(p.name)}</b>${p.pid === r.hostPid ? ' 👑' : ''}${p.pid === me.pid ? ' <small>(tú)</small>' : ''}${p.v && r.hostV && p.v !== r.hostV ? `<div class="verwarn">⚠️ Tiene otra versión (${esc(p.v)}). ¡Actualizad todos a la misma!</div>` : ''}`}</div>
       ${teamChip(r, p, isHost)}
       ${local && i > 0 ? `<button class="iconbtn" data-rmlocal="${i}">✖</button>` : ''}
     </div>`).join('');
@@ -723,7 +749,7 @@ function lobbyHTML() {
     }).join('')}
     ${g.teams ? `<div class="seg"><button class="${r.teamMode ? '' : 'on'}" data-mode="solo">👤 Cada uno por su cuenta</button><button class="${r.teamMode ? 'on' : ''}" data-mode="teams">🤝 Por equipos${g.teams === 'pairs4' ? ' (parejas)' : ''}</button></div>
       ${r.teamMode ? `${teamColumns(r, true)}<div class="row center"><button class="btn c3" data-a="shuffleteams">🎲 Sortear equipos</button></div><p class="hint light">Toca a un jugador para cambiarlo de equipo.</p>` : ''}` : ''}
-    ${local && r.players.length < MAX_PLAYERS ? '<button class="btn ghost" data-a="addlocal">➕ Añadir jugador</button>' : ''}
+    ${local && r.players.length < MAX_PLAYERS ? '<div class="row"><button class="btn ghost" data-a="addlocal">➕ Añadir persona</button><button class="btn ghost" data-a="addbot">🤖 Añadir máquina</button></div>' : ''}
     <button class="btn big startbtn ${err ? 'disabled' : 'pulse'}" data-a="start">${err ? '⏳ ' + esc(err) : `▶ ¡Empezar ${g.name}!`}</button>`
     : `${r.teamMode && g.teams ? teamColumns(r, false) : ''}<div class="card waiting"><div class="gpi big">${g.icon}</div><div>Juego elegido: <b>${g.name}</b>${r.teamMode ? ' · 🤝 por equipos' : ''}</div>
       <div class="hint">${(g.options || []).map((op) => { const v = gameOptions(r, g)[op.id]; return op.type === 'bool' ? `${op.label}: ${v ? 'sí' : 'no'}` : `${op.label}: ${op.choices.find((c) => c.v === v)?.label}`; }).join(' · ')}</div>
@@ -800,7 +826,8 @@ function renderGame(before) {
   if (S.mode === 'local' && g.hidden && turn != null && S.curtainSeat !== turn && S.pendingFx && !S.curtainWait) {
     S.curtainWait = setTimeout(() => { S.curtainWait = null; render(); }, 3200);
   }
-  const curtain = S.mode === 'local' && g.hidden && turn != null && S.curtainSeat !== turn && !S.curtainWait;
+  const humansHere = S.mode === 'local' ? r.seats.filter((pid, k) => !isBotSeat(k)).length : 0;
+  const curtain = S.mode === 'local' && g.hidden && humansHere > 1 && turn != null && !isBotSeat(turn) && S.curtainSeat !== turn && !S.curtainWait;
   const demo = S.mode === 'demo';
   app.innerHTML = `
     <header class="topbar" style="--gc:${g.color}">
@@ -814,7 +841,7 @@ function renderGame(before) {
     ${S.reconnecting ? '<div class="reconnect">📡 Reconectando…</div>' : ''}
     ${offline.length ? `<div class="reconnect warn">😴 Sin conexión: ${offline.map((p) => esc(p.name)).join(', ')}</div>` : ''}
     ${demo ? `<div class="democap"><span class="dstep">${S.demo.i}/${S.demo.steps.length}</span> ${esc(S.demo.say || '')}</div>` : ''}
-    ${S.mode === 'local' && turn != null && !curtain ? `<div class="localturn">${ctx.avatar(turn)} Turno de <b>${esc(ctx.players[turn])}</b></div>` : ''}
+    ${S.mode === 'local' && turn != null && !curtain ? `<div class="localturn">${ctx.avatar(turn)} ${isBotSeat(turn) ? `Piensa <b>${esc(ctx.players[turn])}</b>… 🤔` : `Turno de <b>${esc(ctx.players[turn])}</b>`}</div>` : ''}
     ${curtain ? `<div class="curtain"><div class="bigemoji">${ctx.avatar(turn)}</div><h2>Pasa el móvil a<br><b>${esc(ctx.players[turn])}</b></h2><p>Los demás, ¡no miréis! 🙈</p><button class="btn big c1" data-a="uncurtain">👀 Soy ${esc(ctx.players[turn])}, ver mi turno</button></div>` : `<main id="board" class="board-${g.id}"></main>`}
     ${demo && S.demo.done ? '<div class="endbar"><button class="btn big c1" data-a="demoagain">🔁 Ver otra vez</button><button class="btn big" data-a="leave">✅ ¡Entendido!</button></div>' : ''}
     ${!demo && g.isOver(s) ? `<div class="endbar">${isHost
@@ -1021,6 +1048,12 @@ function bind() {
       case 'addlocal': {
         const n = r.players.length + 1;
         r.players.push({ pid: 'L' + n + randCode(2), name: 'Jugador ' + n, avatar: AVATARS[(n * 5) % AVATARS.length], online: true });
+        render(); break;
+      }
+      case 'addbot': {
+        const names = ['Robotín', 'Chispas', 'Tuerca', 'Bip-Bop', 'Pixel'];
+        const nb = r.players.filter((p) => p.bot).length;
+        r.players.push({ pid: 'B' + nb + randCode(3), name: names[nb % names.length], avatar: '🤖', online: true, bot: true });
         render(); break;
       }
       case 'addwish': {

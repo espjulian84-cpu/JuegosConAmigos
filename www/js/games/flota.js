@@ -207,9 +207,11 @@ export default {
     } else {
       const myTurn = me === s.turn && !s.over;
       const targets = me != null ? targetsOf(s, me) : [...Array(s.n).keys()].filter((k) => alive(s, k));
-      if (!myTurn && s.lastShot && s.lastShot.target !== me) ui.tab = s.lastShot.target;
-      if (ui.tab == null || !targets.includes(ui.tab) && !(s.lastShot && s.lastShot.target === ui.tab)) ui.tab = targets[0];
-      if (s.over && ui.tab == null) ui.tab = (me + 1) % s.n;
+      // Qué mar enemigo se ve: nunca el tuyo propio.
+      // En tu turno, uno de tus objetivos; si no, el último mar atacado (si no es el tuyo).
+      if (myTurn) { if (!targets.includes(ui.tab)) ui.tab = targets[0]; }
+      else if (s.lastShot && s.lastShot.target !== me) ui.tab = s.lastShot.target;
+      if (ui.tab === me || ui.tab == null || ui.tab >= s.n) ui.tab = targets[0] ?? [...Array(s.n).keys()].find((k) => k !== me);
       const tabs = targets.length > 1 ? `<div class="chips seatabs">${targets.map((k) => `<button class="chip ${k === ui.tab ? 'on' : ''}" data-tab="${k}" style="--pc:${color(k)}">${ctx.avatar(k)} ${esc(ctx.players[k])}</button>`).join('')}</div>` : '';
       if (s.over) status = `🏆 ¡Gana ${ctx.winnerName(s.winner)}!`;
       else if (myTurn) status = '💣 ¡Te toca! Toca una casilla del mar enemigo';
