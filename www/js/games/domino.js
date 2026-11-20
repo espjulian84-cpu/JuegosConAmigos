@@ -51,7 +51,7 @@ export default {
   blurb: 'El clásico de toda la vida. Coloca tus fichas y quédate sin ninguna. ¡A 100 puntos!',
 
   setup(n, opts = {}) {
-    const s = { teams: opts.teams || null, n, scores: Array(n).fill(0), target: 100, round: 1, starter: null, v: 0, log: [] };
+    const s = { help: !opts.options || opts.options.ayuda !== false, teams: opts.teams || null, n, scores: Array(n).fill(0), target: 100, round: 1, starter: null, v: 0, log: [] };
     newRound(s);
     pushLog(s, 'Empieza quien tiene el doble más alto');
     return s;
@@ -128,6 +128,7 @@ export default {
     fail('Acción desconocida');
   },
 
+  options: [{ id: 'ayuda', label: '💡 Ayuda: resaltar las fichas que encajan', type: 'bool', def: true }],
   rules: `
     <ol>
       <li>Se reparten 7 fichas a cada jugador. Empieza quien tenga el doble más alto.</li>
@@ -193,17 +194,21 @@ export default {
       const isNew = (s.lastPlaced === 'L' && k === 0) || (s.lastPlaced === 'R' && k === s.chain.length - 1);
       return tileHTML(t[0], t[1], { vertical: t[0] === t[1], cls: isNew ? 'drop-in' : '' });
     }).join('');
+    // las fichas de la mesa se hacen más pequeñas según crece la fila, para que quepan sin doblar tanto
+    const nT = s.chain.length;
+    const tw = nT <= 8 ? 34 : nT <= 12 ? 28 : nT <= 16 ? 24 : nT <= 21 ? 21 : 18;
 
     let hand = '';
     if (me != null && s.hands[me]) {
       hand = s.hands[me].map((t, i) => {
-        const ok = myTurn && sidesFor(s, t).length > 0;
+        const ok = s.help !== false && myTurn && sidesFor(s, t).length > 0;
         return `<button class="tilebtn ${ok ? 'playable' : ''} ${ui.pick === i ? 'picked' : ''}" data-i="${i}" ${myTurn ? '' : 'disabled'}>${tileHTML(t[0], t[1], { vertical: true })}</button>`;
       }).join('');
     }
 
     let actions = '';
-    if (myTurn && !canPlayAny(s, me)) {
+    // sin ayuda, los botones de robar/pasar están siempre (el juego avisa si en realidad puedes poner)
+    if (myTurn && (s.help === false || !canPlayAny(s, me))) {
       actions = s.boneyard.length
         ? `<button class="btn big pulse" data-act="draw">🫳 Robar ficha (${s.boneyard.length})</button>`
         : `<button class="btn big pulse" data-act="pass">🙅 Pasar</button>`;
@@ -225,7 +230,7 @@ export default {
       <div class="players">${players}</div>
       <div class="status">${status}</div>
       <div class="domino-table felt">
-        <div class="chain">${chain || '<div class="hint">La mesa está vacía… ¡sale el primero!</div>'}</div>
+        <div class="chain" style="--tw:${tw}px">${chain || '<div class="hint">La mesa está vacía… ¡sale el primero!</div>'}</div>
         <div class="boneyard">Montón: ${s.boneyard.length}</div>
       </div>
       <div class="actions">${actions}${nextBtn}</div>

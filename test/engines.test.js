@@ -69,6 +69,19 @@ for (const g of GAMES) {
   }
 }
 
+// Hundir la flota: con la flota rival oculta, cada jugador sigue teniendo a quién disparar
+{
+  const flota = GAMES.find((x) => x.id === 'flota');
+  let s = flota.setup(2);
+  s = flota.action(s, 0, { type: 'ready' }); s = flota.action(s, 1, { type: 'ready' });
+  const { targetsOf } = await import('../www/js/games/flota.js');
+  for (const seat of [0, 1]) {
+    const v = flota.viewFor(s, seat);
+    assert.deepEqual(targetsOf(v, seat), [1 - seat], 'cada jugador debe poder apuntar al rival con la vista filtrada');
+    assert.equal(v.fleets[1 - seat].length, 0, 'no se ven los barcos del rival');
+  }
+}
+
 // Reglas concretas
 assert.throws(() => oca.action(oca.setup(2), 1, { type: 'roll' }), GameError, 'no se puede jugar fuera de turno');
 {

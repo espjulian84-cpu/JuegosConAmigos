@@ -434,7 +434,7 @@ function runPendingFx(board) {
   if (!p) return;
   S.pendingFx = null;
   const g = getGame(S.room.gameId);
-  const go = () => { try { g.animate(p.f, board, { ...makeCtx(), state: S.room.state }); } catch (e) { console.error(e); } };
+  const go = () => { try { g.animate(p.f, board, makeCtx()); } catch (e) { console.error(e); } };
   if (p.delay) setTimeout(go, p.delay); else requestAnimationFrame(go);
 }
 
@@ -618,11 +618,20 @@ function qrSVG(text) {
   } catch { return ''; }
 }
 
+// Lo que este móvil puede ver: en juegos con información oculta, también el anfitrión
+// y el modo "todos en este móvil" ven solo lo suyo (los invitados ya lo reciben filtrado).
+function visibleState() {
+  const r = S.room, g = getGame(r.gameId);
+  if (!g.viewFor || S.mode === 'client' || S.mode === 'demo') return r.state;
+  const seat = mySeat();
+  return seat == null ? r.state : g.viewFor(r.state, seat);
+}
+
 function makeCtx() {
   const r = S.room;
   const seatPlayers = r.seats.map((pid) => r.players.find((p) => p.pid === pid) || { name: '¿?', avatar: '❔' });
   const names = seatPlayers.map((p) => p.name);
-  const s = r.state;
+  const s = visibleState();
   const seat = mySeat();
   return {
     players: names,
@@ -680,7 +689,7 @@ function renderGame(before) {
       : '<div class="hint">Esperando al anfitrión para la revancha…</div>'}</div>` : ''}`;
   const board = document.getElementById('board');
   if (board) {
-    g.render(board, s, ctx);
+    g.render(board, ctx.state, ctx);
     const skip = (S.pendingFx && S.pendingFx.f.noFlip) || [];
     fx.animateFrom(board, before, skip);
     runPendingFx(board);

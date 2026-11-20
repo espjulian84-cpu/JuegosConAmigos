@@ -88,7 +88,7 @@ function cellScene(n) {
 const LABEL = { 6: 'PUENTE', 12: 'PUENTE', 19: 'POSADA', 26: 'DADOS', 53: 'DADOS', 31: 'POZO', 42: 'LABERINTO', 56: 'CÁRCEL', 58: 'MUERTE', 63: 'JARDÍN' };
 
 export function buildBoard(CELLS, SPECIAL) {
-  const S = 100, I = 13;
+  const S = 100, I = 8;
   const out = [];
   const pieces = (n, inset) => {
     const [r, c] = CELLS[n];
@@ -118,7 +118,7 @@ export function buildBoard(CELLS, SPECIAL) {
   // viñetas
   for (let n = 0; n <= 63; n++) {
     const [r, c] = CELLS[n];
-    const x = c * S + I + 3, y = r * S + I + 3, w = S - 2 * I - 6;
+    const x = c * S + I + 2, y = r * S + I + 2, w = S - 2 * I - 4;
     out.push(`<clipPath id="cc${n}"><rect x="${x}" y="${y}" width="${w}" height="${w}" rx="11"/></clipPath>`);
     if (n === 0) {
       out.push(`<rect x="${x}" y="${y}" width="${w}" height="${w}" rx="11" fill="url(#check)"/><rect x="${x + 4}" y="${y + w / 2 - 12}" width="${w - 8}" height="24" rx="8" fill="#fff"/><text x="${x + w / 2}" y="${y + w / 2 + 6}" text-anchor="middle" font-size="15" font-weight="800" fill="#222">SALIDA</text>`);

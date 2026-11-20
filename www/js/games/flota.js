@@ -31,7 +31,10 @@ export function randomFleet(size, lens) {
   throw new Error('No se pudo colocar la flota');
 }
 
-const alive = (s, seat) => s.fleets[seat].some((sh) => !sh.sunk);
+// "a flote" se cuenta con los barcos hundidos (que todos ven), no con los barcos ocultos:
+// así funciona igual en el móvil de cada jugador, donde la flota rival no se envía.
+const sunkCount = (s, seat) => s.fleets[seat].filter((sh) => sh.sunk).length;
+const alive = (s, seat) => sunkCount(s, seat) < s.lens.length;
 const hitAt = (s, seat, r, c) => s.fleets[seat].findIndex((sh) => shipCells(sh).some(([a, b]) => a === r && b === c));
 const unit = (s, seat) => (s.teams ? s.teams[seat] : seat);
 
@@ -130,7 +133,7 @@ export default {
     }
     sh.sunk = true;
     pushLog(s, `{${seat}} hunde el ${NAMES[sh.len] || 'barco'} de {${t}}`);
-    s.fx = { id: s.v, type: 'shot', from: seat, target: t, r: a.r, c: a.c, result: 'sunk', ship: k, text: `¡Hundido! ${NAMES[sh.len] || ''}`, emoji: '💥', bannerDelay: 1050 };
+    s.fx = { id: s.v, type: 'shot', from: seat, target: t, r: a.r, c: a.c, result: 'sunk', ship: k, sr: sh.r, sc: sh.c, text: `¡Hundido! ${NAMES[sh.len] || ''}`, emoji: '💥', bannerDelay: 1050 };
     if (!alive(s, t)) pushLog(s, `💀 {${t}} se queda sin flota`);
     const units = new Set([...Array(s.n).keys()].filter((p) => alive(s, p)).map((p) => unit(s, p)));
     if (units.size <= 1) {
@@ -175,7 +178,7 @@ export default {
     const chips = [...Array(s.n).keys()].map((k) => `
       <div class="pchip ${(s.phase === 'battle' && k === s.turn && !s.over) ? 'turn' : ''}" style="--pc:${color(k)}">
         <span class="avatar">${ctx.avatar(k)}</span><span class="pname">${esc(ctx.players[k])}${s.teams ? ' ' + TEAM_EMOJI[s.teams[k]] : ''}</span>
-        <span class="pinfo">${s.phase === 'place' ? (s.ready[k] ? '✅' : '⏳') : alive(s, k) ? '🚢'.repeat(Math.min(5, s.lens.length - s.fleets[k].filter((x) => x.sunk).length)) || '🚢' : '💀'}</span></div>`).join('');
+        <span class="pinfo">${s.phase === 'place' ? (s.ready[k] ? '✅' : '⏳') : alive(s, k) ? '🚢'.repeat(s.lens.length - sunkCount(s, k)) : '💀'}</span></div>`).join('');
 
     const sea = (owner, big, clickable, editable) => {
       const shots = s.shots[owner];
@@ -186,7 +189,7 @@ export default {
         cells.push(`<div class="scell ${clickable && !v ? 'can' : ''} ${editable ? 'edit' : ''}" data-cell="${owner}-${r}-${c}" data-r="${r}" data-c="${c}">${v === 'w' ? `<span class="mk miss ${fresh ? 'fresh' : ''}"></span>` : v === 'h' ? `<span class="mk hit ${fresh ? 'fresh' : ''}">🔥</span>` : ''}</div>`);
       }
       const ships = s.fleets[owner].map((sh, i) => {
-        const justSunk = s.fx && s.fx.result === 'sunk' && s.fx.target === owner && s.fx.ship === i;
+        const justSunk = s.fx && s.fx.result === 'sunk' && s.fx.target === owner && sh.r === s.fx.sr && sh.c === s.fx.sc;
         const sel = editable && ui.sel === i;
         return `<div class="ship ${sh.dir} ${sh.sunk ? 'sunk' : ''} ${justSunk ? 'sinking' : ''} ${sel ? 'sel' : ''}" data-ship="${i}" style="left:${(sh.c / N) * 100}%;top:${(sh.r / N) * 100}%;--len:${sh.len};--n:${N}">${SHIP_SVG(sh.len, sh.dir)}</div>`;
       }).join('');
@@ -252,7 +255,7 @@ export default {
     fx.screenShake(f.result === 'sunk' ? 14 : 8);
     ctx.sound('boom');
     if (f.result === 'sunk') {
-      const ship = el.querySelector(`.sea [data-ship="${f.ship}"].sinking`);
+      const ship = el.querySelector('.sea .ship.sinking');
       const c = ship ? fx.center(ship) : to;
       await fx.wait(500);
       fx.bubbles(c.x, c.y, 26, c.w / 2);

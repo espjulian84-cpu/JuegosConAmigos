@@ -495,3 +495,18 @@ canvas.race { display: block; width: 100%; height: min(62vh, 560px); touch-actio
 .ppos { font-size: 1.8rem; width: 44px; text-align: center; }
 .prow .avatar { font-size: 1.6rem; }
 .ptime { margin-left: auto; color: var(--muted); font-weight: 700; }
+
+/* Mesa de dominó más grande: ocupa todo el ancho y las fichas se adaptan */
+.domino-table { margin: 0 -8px; min-height: 300px; padding: 12px 6px 24px !important; display: flex; align-items: center; justify-content: center; }
+.chain { gap: 2px !important; row-gap: 10px !important; width: 100%; }
+.chain .tile.h { width: calc(var(--tw) * 2); height: var(--tw); border-radius: calc(var(--tw) / 5); }
+.chain .tile.v { width: var(--tw); height: calc(var(--tw) * 2); border-radius: calc(var(--tw) / 5); }
+.chain .tile .half { padding: calc(var(--tw) / 12); }
+
+/* La Oca: tablero a todo lo ancho y modo ampliado con desplazamiento */
+.oca-wrap { margin: 0 -8px; max-width: none; }
+.oca-board2 { container-type: inline-size; }
+.oca-wrap.zoom { overflow: auto; aspect-ratio: 1; border-radius: 18px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; box-shadow: inset 0 0 0 3px rgba(255,255,255,.5); }
+.oca-wrap.zoom .oca-board2 { width: 210%; }
+.ocazoom { display: flex; justify-content: center; margin-top: 8px; }
+@media (min-width: 640px) { .oca-wrap { margin: 0 auto; max-width: 620px; } }

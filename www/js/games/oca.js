@@ -165,7 +165,7 @@ export default {
       const off = OFFSETS[Math.min(m, 6)][k];
       const sz = m > 3 ? 0.42 : m > 1 ? 0.55 : 0.72;
       const svg = pieceSVG(s.ficha, PLAYER_COLORS[i], ctx.avatar(i));
-      return `<div class="otok ${svg ? 'pstyle' : 'tok3d'}" data-flip="o${i}" style="--pc:${PLAYER_COLORS[i]};left:${((c + 0.5 + off[0]) / 8) * 100}%;top:${((r + 0.5 + off[1]) / 8) * 100}%;width:${(sz / 8) * 100}%;margin:-${(sz / 16) * 100}% 0 0 -${(sz / 16) * 100}%;font-size:${sz * 5.2}vmin">${svg || ctx.avatar(i)}</div>`;
+      return `<div class="otok ${svg ? 'pstyle' : 'tok3d'}" data-flip="o${i}" style="--pc:${PLAYER_COLORS[i]};left:${((c + 0.5 + off[0]) / 8) * 100}%;top:${((r + 0.5 + off[1]) / 8) * 100}%;width:${(sz / 8) * 100}%;margin:-${(sz / 16) * 100}% 0 0 -${(sz / 16) * 100}%;font-size:${(sz / 8) * 55}cqw">${svg || ctx.avatar(i)}</div>`;
     }).join('');
 
     let status;
@@ -175,12 +175,24 @@ export default {
     el.innerHTML = `
       <div class="players">${players}</div>
       <div class="status">${status}</div>
-      <div class="oca-wrap"><div class="oca-board2">${BOARD_SVG}<div class="otoks2">${toks}</div></div></div>
+      <div class="oca-wrap ${zoomed() ? 'zoom' : ''}"><div class="oca-board2">${BOARD_SVG}<div class="otoks2">${toks}</div></div></div>
+      <div class="ocazoom"><button class="btn small" data-zoom>${zoomed() ? '🔎 Ver tablero entero' : '🔍 Ampliar tablero'}</button></div>
       <div class="dicebar">
         <button class="die3d ${s.rollId === s.v ? 'rolling' : ''}" data-roll ${myTurn ? '' : 'disabled'} style="--c:${PLAYER_COLORS[s.turn]}"><span>${s.dieVal ? DIE_FACES[s.dieVal] : '🎲'}</span></button>
         <div class="log">${(s.log || []).slice(0, 3).map((l) => `<div>${ctx.fmt(l)}</div>`).join('')}</div>
       </div>`;
     el.querySelector('[data-roll]').onclick = () => ctx.send({ type: 'roll' });
+    el.querySelector('[data-zoom]').onclick = () => { try { localStorage.setItem('jca.ocaZoom', zoomed() ? '0' : '1'); } catch {} ctx.rerender(); };
+    // con el tablero ampliado, la vista se centra en la ficha que va a jugar (o la que se mueve)
+    const wrap = el.querySelector('.oca-wrap.zoom');
+    if (wrap) {
+      const ui = ctx.ui;
+      const fxId = s.fx && s.fx.walk ? s.fx.id : null;
+      if (fxId != null && ui.ocaFx !== fxId) { ui.ocaFx = fxId; requestAnimationFrame(() => centerOn(el, s.fx.from, false)); }
+      else if (ui.ocaScroll) requestAnimationFrame(() => { wrap.scrollLeft = ui.ocaScroll[0]; wrap.scrollTop = ui.ocaScroll[1]; });
+      else requestAnimationFrame(() => centerOn(el, s.pos[s.turn], false));
+      wrap.addEventListener('scroll', () => { ui.ocaScroll = [wrap.scrollLeft, wrap.scrollTop]; }, { passive: true });
+    }
   },
 
   // ---------- animaciones: la ficha recorre el camino casilla a casilla y luego el efecto especial ----------
@@ -198,6 +210,8 @@ export default {
     let at = cell(f.from);
     // 1) paso a paso
     for (const n of f.walk) {
+      if (zoomed()) { centerOn(el, n, true); }
+      const bb = board.getBoundingClientRect(); br.x = bb.x; br.y = bb.y;
       const to = cell(n);
       ctx.sound('move');
       await fx.fly(html, at, to, { size, arc: 26, duration: 180, linear: true });
@@ -254,10 +268,20 @@ export default {
     }
     if (f.effect === 'goal') { fx.fireworksShow(br, 9); ctx.sound('firework'); fx.sparkle(at.x, at.y, '#ffd43b', 30, 2); }
     real.style.opacity = '';
+    if (zoomed()) centerOn(el, f.to, true);
     real.animate([{ transform: 'scale(1.6)' }, { transform: 'scale(1)' }], { duration: 300, easing: 'cubic-bezier(.3,1.6,.6,1)' });
   },
 };
 
+const zoomed = () => { try { return localStorage.getItem('jca.ocaZoom') === '1'; } catch { return false; } };
+function centerOn(el, n, smooth) {
+  const wrap = el.querySelector('.oca-wrap.zoom');
+  if (!wrap) return;
+  const [r, c] = CELLS[n];
+  const b = wrap.querySelector('.oca-board2');
+  const x = ((c + 0.5) / 8) * b.offsetWidth - wrap.clientWidth / 2, y = ((r + 0.5) / 8) * b.offsetHeight - wrap.clientHeight / 2;
+  wrap.scrollTo({ left: x, top: y, behavior: smooth ? 'smooth' : 'auto' });
+}
 const DIE_FACES = [null, '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 const OFFSETS = [
   [[0, 0]], [[0, 0]], [[-0.2, 0], [0.2, 0]], [[-0.2, -0.15], [0.2, -0.15], [0, 0.18]],
