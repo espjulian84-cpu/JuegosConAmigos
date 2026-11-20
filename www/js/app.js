@@ -734,7 +734,7 @@ function lobbyHTML() {
     ${S.reconnecting ? '<div class="reconnect">📡 Reconectando…</div>' : ''}
     <div class="lobby">
       ${invite}
-      <h2 class="sect">Jugadores (${r.players.length}/${MAX_PLAYERS})</h2>
+      <h2 class="sect">Jugadores (${r.players.length}/${MAX_PLAYERS}) <small class="vertag">versión ${VERSION}</small></h2>
       <div class="lplayers">${players}</div>
       ${picker}
     </div>`;
@@ -797,7 +797,10 @@ function renderGame(before) {
   const ctx = makeCtx();
   const turn = g.turnOf(s);
   // Juegos con información oculta en un solo móvil: cortina para pasar el móvil sin ver lo del otro
-  const curtain = S.mode === 'local' && g.hidden && turn != null && S.curtainSeat !== turn;
+  if (S.mode === 'local' && g.hidden && turn != null && S.curtainSeat !== turn && S.pendingFx && !S.curtainWait) {
+    S.curtainWait = setTimeout(() => { S.curtainWait = null; render(); }, 3200);
+  }
+  const curtain = S.mode === 'local' && g.hidden && turn != null && S.curtainSeat !== turn && !S.curtainWait;
   const demo = S.mode === 'demo';
   app.innerHTML = `
     <header class="topbar" style="--gc:${g.color}">
@@ -934,7 +937,7 @@ function renderModal() {
     d.innerHTML = `<div class="sheet rules"><div class="rulehead" style="--gc:${g.color}"><span class="gicon">${g.icon}</span><h3>Cómo se juega: ${g.name}</h3></div>
       <div class="ruletext">${g.rules || ''}</div>
       ${g.demo && !S.mode ? `<button class="btn big c1" data-demo="${g.id}">▶ Ver partida de ejemplo</button>` : ''}
-      <button class="btn" data-close>Cerrar</button></div>`;
+      <button class="btn" data-close>Cerrar</button><p class="hint center">Juegos con Amigos · versión ${VERSION}</p></div>`;
     d.querySelectorAll('[data-demo]').forEach((b) => b.onclick = () => { sound.play('click'); startDemo(b.dataset.demo); });
   } else if (m.type === 'confirmleave') {
     const inGame = S.screen === 'game';

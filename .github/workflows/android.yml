@@ -32,7 +32,13 @@ jobs:
       - name: Preparar proyecto Android
         run: |
           npm run vendor
-          echo "export const VERSION = '1.0.${{ github.run_number }}';" > www/js/version.js
+          VER=1.0.${{ github.run_number }}
+          echo "export const VERSION = '$VER';" > www/js/version.js
+          # todo el código en un único archivo con la versión en el nombre:
+          # así el móvil nunca puede usar archivos guardados de una versión anterior
+          npx --yes esbuild@0.24.2 www/js/app.js --bundle --format=esm --outfile=www/app-$VER.js --log-level=warning
+          sed -i "s#js/app.js#app-$VER.js#; s#css/style.css#css/style.css?v=$VER#" www/index.html
+          grep -q "app-$VER.js" www/index.html
           npx cap add android
           npx --yes @capacitor/assets@3.0.5 generate --android --assetPath assets
           # permiso de vibración (avisos de turno)

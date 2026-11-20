@@ -657,3 +657,4 @@ canvas.race { display: block; width: 100%; height: min(62vh, 560px); touch-actio
 .updcard { display: flex; align-items: center; gap: 10px; margin: 10px 0; text-decoration: none; color: inherit; background: linear-gradient(135deg, #fff3bf, #fff); border: 3px solid #fab005; animation: pulse 1.6s infinite; }
 .updcard span { font-size: 1.8rem; } .updcard small { display: block; color: var(--muted); }
 .verwarn { color: #c92a2a; font-size: .8rem; font-weight: 700; }
+.vertag { font-size: .7rem; opacity: .75; font-weight: 700; margin-left: 6px; }

@@ -201,7 +201,7 @@ export default {
     if (s.phase === 'place') {
       const editing = me != null && !s.ready[me];
       if (ui.sel == null) ui.sel = null;
-      status = editing ? '⚓ Coloca tus barcos: toca uno, luego la casilla donde lo quieres' : me == null ? 'Los capitanes colocan su flota…' : '✅ ¡Listo! Esperando a los demás capitanes…';
+      status = editing ? (ui.sel == null ? '⚓ Toca un barco para moverlo (o pulsa Al azar)' : '⚓ Toca una casilla libre para llevarlo, o tócalo otra vez para girarlo') : me == null ? 'Los capitanes colocan su flota…' : '✅ ¡Listo! Esperando a los demás capitanes…';
       body = me != null ? `${sea(me, true, false, editing)}
         ${editing ? `<div class="actions"><button class="btn" data-rot ${ui.sel == null ? 'disabled' : ''}>↻ Girar</button><button class="btn c3" data-rand>🔀 Al azar</button><button class="btn c1 pulse" data-ready>✅ ¡Listo!</button></div>` : ''}` : '';
     } else {
@@ -214,18 +214,30 @@ export default {
       if (s.over) status = `🏆 ¡Gana ${ctx.winnerName(s.winner)}!`;
       else if (myTurn) status = '💣 ¡Te toca! Toca una casilla del mar enemigo';
       else status = `Dispara <b>${esc(ctx.players[s.turn])}</b>…`;
-      body = `${tabs}<div class="sealabel">Mar de ${ui.tab != null ? esc(ctx.players[ui.tab]) : ''}</div>${ui.tab != null ? sea(ui.tab, true, myTurn && targets.includes(ui.tab), false) : ''}
-        ${me != null ? `<div class="sealabel">Tu flota</div>${sea(me, false, false, false)}` : ''}`;
+      // en tu turno ves en grande el mar enemigo (solo agua) para disparar;
+      // en el turno del rival ves en grande tu flota, para ver dónde te caen las bombas
+      const showMine = !myTurn && me != null && !s.over;
+      const enemy = ui.tab != null ? `<div class="sealabel">${myTurn ? '🎯 ' : ''}Mar de ${esc(ctx.players[ui.tab])}</div>${sea(ui.tab, !showMine, myTurn && targets.includes(ui.tab), false)}` : '';
+      const mine = me != null ? `<div class="sealabel">⚓ Tu flota</div>${sea(me, showMine, false, false)}` : '';
+      body = showMine ? `${mine}${enemy}` : `${myTurn ? tabs : ''}${enemy}${mine}`;
     }
     el.innerHTML = `<div class="players">${chips}</div><div class="status">${status}</div>${body}
       <div class="log">${(s.log || []).slice(0, 2).map((l) => `<div>${ctx.fmt(l)}</div>`).join('')}</div>`;
 
     // interacción
     if (s.phase === 'place' && me != null && !s.ready[me]) {
-      el.querySelectorAll('.sea.big [data-ship]').forEach((d) => d.onclick = (e) => { e.stopPropagation(); ui.sel = +d.dataset.ship; ctx.rerender(); });
+      // Colocar a mano: toca un barco para elegirlo, tócalo otra vez para girarlo,
+      // y toca una casilla libre para llevarlo allí (su punta queda en esa casilla).
       el.querySelectorAll('.sea.big .scell').forEach((d) => d.onclick = () => {
+        const r = +d.dataset.r, c = +d.dataset.c;
+        const k = s.fleets[me].findIndex((sh) => shipCells(sh).some(([a, b]) => a === r && b === c));
+        if (k >= 0) {
+          if (ui.sel === k) { const sh = s.fleets[me][k]; ctx.send({ type: 'move', i: k, r: sh.r, c: sh.c, dir: sh.dir === 'h' ? 'v' : 'h' }); }
+          else { ui.sel = k; ctx.sound('click'); ctx.rerender(); }
+          return;
+        }
         if (ui.sel == null) return ctx.toast('Primero toca un barco');
-        ctx.send({ type: 'move', i: ui.sel, r: +d.dataset.r, c: +d.dataset.c });
+        ctx.send({ type: 'move', i: ui.sel, r, c });
       });
       const rot = el.querySelector('[data-rot]');
       if (rot) rot.onclick = () => { const sh = s.fleets[me][ui.sel]; ctx.send({ type: 'move', i: ui.sel, r: sh.r, c: sh.c, dir: sh.dir === 'h' ? 'v' : 'h' }); };
