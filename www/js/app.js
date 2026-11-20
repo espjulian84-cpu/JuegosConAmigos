@@ -9,7 +9,7 @@ import * as fx from './fx.js';
 import { esc, PLAYER_COLORS, TEAM_NAMES, TEAM_EMOJI, TEAM_COLORS, GameError } from './util.js';
 import { qrcode } from '../vendor/qrcode.mjs';
 
-const DOWNLOAD_URL = 'https://github.com/espjulian84-cpu/JuegosConAmigos/releases/latest';
+const DOWNLOAD_URL = 'https://github.com/espjulian84-cpu/JuegosConAmigos/releases/latest/download/JuegosConAmigos.apk';
 const AVATARS = ['🦊', '🐼', '🐸', '🐯', '🐵', '🐰', '🦄', '🐙', '🐨', '🦁', '🐷', '🐮', '🐔', '🐧', '🐲', '🦖', '👽', '🤖', '🐶', '🐱', '🦉', '🐢', '🦋', '🐝'];
 const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const randCode = (n) => Array.from({ length: n }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('');
