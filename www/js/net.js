@@ -13,6 +13,9 @@ function peerOpts() {
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:global.stun.twilio.com:3478' },
+        // Servidor puente público y gratuito: se usa solo si la red (p. ej. datos móviles)
+        // no permite la conexión directa entre los dos móviles.
+        { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
       ],
     },
   };
