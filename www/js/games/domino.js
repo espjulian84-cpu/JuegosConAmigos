@@ -51,7 +51,7 @@ export default {
   blurb: 'El clásico de toda la vida. Coloca tus fichas y quédate sin ninguna. ¡A 100 puntos!',
 
   setup(n, opts = {}) {
-    const s = { help: !opts.options || opts.options.ayuda !== false, teams: opts.teams || null, n, scores: Array(n).fill(0), target: 100, round: 1, starter: null, v: 0, log: [] };
+    const s = { help: !!(opts.options && opts.options.ayuda), teams: opts.teams || null, n, scores: Array(n).fill(0), target: 100, round: 1, starter: null, v: 0, log: [] };
     newRound(s);
     pushLog(s, 'Empieza quien tiene el doble más alto');
     return s;
@@ -128,7 +128,7 @@ export default {
     fail('Acción desconocida');
   },
 
-  options: [{ id: 'ayuda', label: '💡 Ayuda: resaltar las fichas que encajan', type: 'bool', def: true }],
+  options: [{ id: 'ayuda', label: '💡 Ayuda: resaltar las fichas que encajan', type: 'bool', def: false }],
   rules: `
     <ol>
       <li>Se reparten 7 fichas a cada jugador. Empieza quien tenga el doble más alto.</li>
@@ -190,13 +190,8 @@ export default {
         <span class="pinfo"><i class="minitile"></i>×${h.length} · ⭐${s.teams ? teamScore(s, i) : s.scores[i]}</span>
       </div>`).join('');
 
-    const chain = s.chain.map((t, k) => {
-      const isNew = (s.lastPlaced === 'L' && k === 0) || (s.lastPlaced === 'R' && k === s.chain.length - 1);
-      return tileHTML(t[0], t[1], { vertical: t[0] === t[1], cls: isNew ? 'drop-in' : '' });
-    }).join('');
-    // las fichas de la mesa se hacen más pequeñas según crece la fila, para que quepan sin doblar tanto
-    const nT = s.chain.length;
-    const tw = nT <= 8 ? 34 : nT <= 12 ? 28 : nT <= 16 ? 24 : nT <= 21 ? 21 : 18;
+    const table = snakeHTML(s, Math.max(280, (el.clientWidth || 360) + 4));
+    const ends = s.chain.length ? [s.chain[0][0], s.chain[s.chain.length - 1][1]] : null;
 
     let hand = '';
     if (me != null && s.hands[me]) {
@@ -214,7 +209,7 @@ export default {
         : `<button class="btn big pulse" data-act="pass">🙅 Pasar</button>`;
     }
     if (ui.pick != null && myTurn) {
-      actions = `<div class="row"><button class="btn big" data-side="L">◀ Izquierda</button><button class="btn big" data-side="R">Derecha ▶</button></div>`;
+      actions = `<div class="row"><button class="btn big" data-side="L">Poner en el extremo del ${ends[0]} ◀</button><button class="btn big" data-side="R">▶ Poner en el extremo del ${ends[1]}</button></div>`;
     }
 
     let status;
@@ -229,8 +224,9 @@ export default {
     el.innerHTML = `
       <div class="players">${players}</div>
       <div class="status">${status}</div>
+      ${ends ? `<div class="dends">Se puede poner: <span class="endnum">${ends[0]}</span> o <span class="endnum">${ends[1]}</span></div>` : ''}
       <div class="domino-table felt">
-        <div class="chain" style="--tw:${tw}px">${chain || '<div class="hint">La mesa está vacía… ¡sale el primero!</div>'}</div>
+        ${table || '<div class="hint">La mesa está vacía… ¡sale el primero!</div>'}
         <div class="boneyard">Montón: ${s.boneyard.length}</div>
       </div>
       <div class="actions">${actions}${nextBtn}</div>
@@ -259,6 +255,57 @@ function half(n, horizontal) {
   for (let k = 0; k < 9; k++) h += `<i class="${on.includes(k) ? 'pip' : ''}" style="--pip:${PIP_COLORS[n]}"></i>`;
   return `<div class="half">${h}</div>`;
 }
+// Mesa en serpiente: filas que van y vuelven, unidas por una flecha curva; las fichas se
+// orientan para que los números que se tocan queden juntos. Los dos extremos brillan.
+function snakeHTML(s, TW) {
+  const C = s.chain;
+  if (!C.length) return '';
+  const M = 22, avail = TW - 2 * M, gap = 3;
+  let u, rows;
+  for (u of [34, 30, 27, 24, 21, 19, 17, 15]) {
+    rows = [[]];
+    let w = 0;
+    C.forEach((t, k) => {
+      const tw = t[0] === t[1] ? u : 2 * u;
+      if (w + tw > avail && rows[rows.length - 1].length) { rows.push([]); w = 0; }
+      rows[rows.length - 1].push(k); w += tw + gap;
+    });
+    if (rows.length * 2.9 * u <= 360) break;
+  }
+  const rowH = 2 * u, rowGap = 0.9 * u;
+  const out = [], pos = [];
+  rows.forEach((row, ri) => {
+    const y = ri * (rowH + rowGap);
+    const rev = ri % 2 === 1;
+    let x = rev ? TW - M : M;
+    row.forEach((k) => {
+      const t = C[k], dbl = t[0] === t[1];
+      const w = dbl ? u : 2 * u, h = dbl ? 2 * u : u;
+      const left = rev ? x - w : x;
+      x = rev ? x - w - gap : x + w + gap;
+      const isNew = (s.lastPlaced === 'L' && k === 0) || (s.lastPlaced === 'R' && k === C.length - 1);
+      const end = k === 0 || k === C.length - 1;
+      const [a, b] = rev && !dbl ? [t[1], t[0]] : [t[0], t[1]];
+      pos[k] = { left, top: y + (rowH - h) / 2, w, h, mid: y + rowH / 2 };
+      out.push(`<div class="stile ${end ? 'endtile' : ''}" style="left:${left}px;top:${y + (rowH - h) / 2}px">${tileHTML(a, b, { vertical: dbl, cls: isNew ? 'drop-in' : '' })}</div>`);
+    });
+  });
+  // flechas curvas en cada cambio de fila
+  const arrows = [];
+  rows.forEach((row, ri) => {
+    if (ri === rows.length - 1) return;
+    const A = pos[row[row.length - 1]], B = pos[rows[ri + 1][0]];
+    const right = ri % 2 === 0;
+    const x1 = right ? A.left + A.w : A.left, x2 = right ? B.left + B.w : B.left;
+    const bx = right ? TW - 6 : 6;
+    arrows.push(`<path d="M${x1} ${A.mid} C${bx} ${A.mid} ${bx} ${B.mid} ${x2 + (right ? 6 : -6)} ${B.mid}" class="sarrow" marker-end="url(#ah)"/>`);
+  });
+  const H = rows.length * rowH + (rows.length - 1) * rowGap;
+  return `<div class="snake chain" style="--tw:${u}px;height:${H}px;width:${TW}px">
+    <svg class="sarrows" width="${TW}" height="${H}"><defs><marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#ffe066"/></marker></defs>${arrows.join('')}</svg>
+    ${out.join('')}</div>`;
+}
+
 export function tileHTML(a, b, { vertical = false, cls = '' } = {}) {
   return `<div class="tile ${vertical ? 'v' : 'h'} ${cls}">${half(a, !vertical)}<div class="bar"></div>${half(b, !vertical)}</div>`;
 }

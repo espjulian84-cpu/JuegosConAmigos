@@ -510,3 +510,113 @@ canvas.race { display: block; width: 100%; height: min(62vh, 560px); touch-actio
 .oca-wrap.zoom .oca-board2 { width: 210%; }
 .ocazoom { display: flex; justify-content: center; margin-top: 8px; }
 @media (min-width: 640px) { .oca-wrap { margin: 0 auto; max-width: 620px; } }
+
+/* Dominó en serpiente */
+.domino-table { flex-direction: column; overflow: hidden; }
+.snake { position: relative; display: block !important; margin: 0 auto; }
+.stile { position: absolute; }
+.sarrows { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.sarrow { fill: none; stroke: #ffe066; stroke-width: 3; stroke-dasharray: 6 5; opacity: .9; }
+.stile.endtile .tile { box-shadow: 0 3px 0 #c9bfa4, 0 0 0 3px #ffe066, 0 0 16px #ffe066; animation: endglow 1.6s ease-in-out infinite; }
+@keyframes endglow { 50% { box-shadow: 0 3px 0 #c9bfa4, 0 0 0 3px #fff, 0 0 22px #fff3bf; } }
+.dends { text-align: center; color: #fff; font-weight: 700; margin-bottom: 6px; }
+.endnum { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: #fffef8; color: #2b2250; font-size: 1.3rem; font-weight: 800; box-shadow: 0 3px 0 #c9bfa4; margin: 0 4px; }
+
+/* Carteles de efectos: arriba y más pequeños, para no tapar el tablero */
+.fxbanner { top: 92px !important; transform: translate(-50%, 0) !important; animation: bannerin2 .45s cubic-bezier(.2,1.6,.5,1) !important; display: flex; align-items: center; gap: 8px; }
+.fxbanner.out { animation: bannerout2 .4s forwards !important; }
+.fxbanner .fxemoji { font-size: 2.2rem !important; }
+.fxbanner .fxtext { font-size: 1.15rem !important; padding: 6px 14px !important; box-shadow: 0 4px 0 rgba(0,0,0,.2) !important; max-width: 74vw !important; }
+.fxbanner.win .fxtext { font-size: 1.35rem !important; }
+@keyframes bannerin2 { from { transform: translate(-50%, -40px) scale(.6); opacity: 0; } }
+@keyframes bannerout2 { to { transform: translate(-50%, -40px); opacity: 0; } }
+
+/* Equipos */
+.seg { display: flex; background: rgba(255,255,255,.2); border-radius: 16px; padding: 4px; gap: 4px; margin: 12px 0 8px; }
+.seg button { flex: 1; border: 0; border-radius: 12px; padding: 10px 6px; font-weight: 800; background: transparent; color: #fff; font-size: .95rem; }
+.seg button.on { background: #fff; color: var(--bg2); box-shadow: 0 3px 0 rgba(0,0,0,.2); }
+.teamcols { display: grid; grid-template-columns: repeat(var(--k), 1fr); gap: 8px; margin: 8px 0; }
+.teamcol { background: #fff; border-radius: 16px; padding: 8px; border-top: 6px solid var(--tc); display: grid; gap: 6px; align-content: start; }
+.tchead { font-weight: 800; color: var(--tc); text-align: center; }
+.tcp { border: 0; border-radius: 12px; padding: 8px; background: color-mix(in srgb, var(--tc) 15%, #fff); font-weight: 700; text-align: left; }
+.tcempty { text-align: center; color: var(--muted); }
+.hint.light { color: rgba(255,255,255,.85); text-align: center; }
+.row.center { justify-content: center; }
+.stack { display: grid; gap: 10px; }
+
+/* Sorteos */
+.drawov { position: fixed; inset: 0; z-index: 70; background: rgba(20,0,50,.6); display: grid; place-items: center; animation: fade .2s; backdrop-filter: blur(3px); }
+.drawov.out { animation: fadeout .4s forwards; }
+@keyframes fadeout { to { opacity: 0; } }
+.drawbox { background: #fff; border-radius: 26px; padding: 18px; width: min(92vw, 520px); text-align: center; animation: popin .35s; }
+.drawrow { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 14px 0; }
+.dav { width: 74px; padding: 8px 4px; border-radius: 16px; background: #f3f0ff; display: grid; justify-items: center; gap: 2px; transition: transform .1s; }
+.dav span { font-size: 2.2rem; }
+.dav b { font-size: .8rem; max-width: 70px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dav.hl { background: #ffe066; transform: scale(1.15); box-shadow: 0 0 0 4px #ffd43b, 0 6px 14px rgba(0,0,0,.25); }
+.drawres { font-size: 1.3rem; min-height: 1.6em; }
+.tdraw { display: grid; gap: 8px; margin-top: 12px; }
+.tdp { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 14px; background: color-mix(in srgb, var(--tc, #ccc) 25%, #fff); border-left: 8px solid var(--tc, #ccc); transition: background .1s; }
+.tdp span { font-size: 1.6rem; } .tdp i { margin-left: auto; font-style: normal; font-weight: 800; }
+.tdp.done { animation: popin .3s; }
+
+/* Chat */
+.bubbles { position: fixed; left: 10px; right: 10px; top: 64px; z-index: 68; display: grid; gap: 6px; pointer-events: none; justify-items: start; }
+.bubble { display: flex; gap: 8px; align-items: center; background: #fff; border-radius: 18px 18px 18px 4px; padding: 6px 12px 6px 6px; box-shadow: 0 6px 16px rgba(0,0,0,.25); animation: bubblein .35s cubic-bezier(.3,1.5,.6,1); max-width: 86vw; }
+.bubble.mine { justify-self: end; border-radius: 18px 18px 4px 18px; background: #e5dbff; }
+.bubble span { font-size: 1.8rem; }
+.bubble b { display: block; font-size: .75rem; color: var(--muted); }
+.bubble.out { animation: fadeout .4s forwards; }
+@keyframes bubblein { from { transform: translateY(-20px) scale(.7); opacity: 0; } }
+.chatlog { max-height: 26vh; overflow: auto; display: grid; gap: 6px; padding: 4px; background: #f8f7fc; border-radius: 14px; }
+.cmsg { display: flex; gap: 6px; align-items: center; } .cmsg span { font-size: 1.4rem; } .cmsg b { display: block; font-size: .72rem; color: var(--muted); }
+.cmsg.mine { flex-direction: row-reverse; text-align: right; }
+.chatsheet .chip { background: #f1e9ff; color: #3d3560; }
+.chatsheet .laughs .chip { background: #fff3bf; }
+.emogrid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+.emogrid button { font-size: 1.7rem; border: 0; background: #f8f7fc; border-radius: 12px; padding: 4px 0; }
+.emogrid button:active, .chatsheet .chip:active { transform: scale(.9); }
+.typeit summary { cursor: pointer; color: var(--muted); font-weight: 700; padding: 4px; }
+.typeit input { flex: 1; border: 2px solid #e6e0f5; border-radius: 12px; padding: 10px; font-size: 1rem; min-width: 0; }
+
+/* Parchís más grande y ampliable */
+.pzoom { margin: 0 -8px; }
+.pzoom .parchis-wrap { max-width: none; border-radius: 14px; padding: 4px; }
+.pzoom.zoom { overflow: auto; aspect-ratio: 1; border-radius: 16px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; box-shadow: inset 0 0 0 3px rgba(255,255,255,.5); }
+.pzoom.zoom .parchis-wrap { width: 190%; }
+.pzoom .pawn { width: 100%; height: 100%; }
+.pzoom .pawn.sm { width: 62%; height: 92%; }
+.pzoom .cell .cnum { font-size: clamp(6px, 1.7vw, 10px); }
+@media (min-width: 640px) { .pzoom { margin: 0 auto; max-width: 620px; } }
+
+/* Turno mucho más visible */
+.pchip { transition: transform .25s, background .25s; }
+.pchip.turn { background: var(--pc) !important; color: #fff; transform: scale(1.12); border-color: #fff !important; box-shadow: 0 0 0 4px color-mix(in srgb, var(--pc) 45%, transparent), 0 6px 16px rgba(0,0,0,.35) !important; position: relative; z-index: 1; animation: turnpulse 1.4s ease-in-out infinite; }
+.pchip.turn .pinfo { color: rgba(255,255,255,.9); }
+.pchip.turn::after { content: '▼'; position: absolute; top: -20px; left: 50%; transform: translateX(-50%); color: #ffe066; font-size: 18px; text-shadow: 0 2px 0 rgba(0,0,0,.4); animation: arrowbob .7s ease-in-out infinite alternate; }
+@keyframes turnpulse { 50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--pc) 25%, transparent), 0 6px 16px rgba(0,0,0,.35); } }
+@keyframes arrowbob { to { transform: translate(-50%, 5px); } }
+.players { padding-top: 16px; }
+.parchis .home.turn { box-shadow: inset 0 0 0 5px var(--c); }
+.hturn { position: absolute; top: 3%; z-index: 2; background: var(--c); color: #fff; font-weight: 800; font-size: clamp(8px, 2.6vw, 13px); padding: 1px 8px; border-radius: 999px; animation: arrowbob2 .7s ease-in-out infinite alternate; box-shadow: 0 2px 4px rgba(0,0,0,.3); }
+@keyframes arrowbob2 { to { transform: translateY(3px); } }
+.hteam { display: inline-grid; place-items: center; width: 1.5em; height: 1.5em; border-radius: 50%; background: var(--tc); margin-right: 3px; box-shadow: 0 0 0 2px #fff; }
+
+/* Bloques de equipo: Luna arriba a la derecha, Sol abajo a la izquierda */
+.players.teambar { display: grid; gap: 8px; justify-content: stretch; }
+.teambox { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 18px 10px 8px; border-radius: 18px; background: color-mix(in srgb, var(--tc) 30%, transparent); border: 3px solid var(--tc); position: relative; width: 88%; }
+.teambox.t1 { justify-self: end; justify-content: flex-end; }
+.teambox.t0 { justify-self: start; }
+.teambox.t2 { justify-self: center; }
+.tbname { position: absolute; top: -12px; background: var(--tc); color: #fff; font-weight: 800; border-radius: 999px; padding: 1px 12px; font-size: .85rem; box-shadow: 0 2px 4px rgba(0,0,0,.3); }
+.teambox.t1 .tbname { right: 14px; } .teambox.t0 .tbname { left: 14px; }
+
+/* Parchís rectangular en el móvil en vertical: casillas y fichas más grandes */
+@media (orientation: portrait) {
+  .pzoom .parchis-wrap { aspect-ratio: 1 / 1.34; }
+  .pzoom.zoom { aspect-ratio: 1 / 1.25; }
+}
+.parchis .home::before { width: 84%; height: auto; aspect-ratio: 1; }
+.parchis .homeslots { width: 56%; height: auto; aspect-ratio: 1; }
+.pzoom .parchis .cell .pawn svg { height: 100%; width: auto; max-width: 100%; }
+.pzoom .parchis .cell .pawn svg.piece { width: 100%; height: auto; }

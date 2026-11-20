@@ -1,4 +1,4 @@
-import { clone, die, esc, fail, pushLog, sameTeam } from '../util.js';
+import { clone, die, esc, fail, pushLog, sameTeam, TEAM_EMOJI, TEAM_COLORS } from '../util.js';
 import { pieceSVG, PIECE_CHOICES } from './pieces.js';
 
 // Tablero de 68 casillas. Cada color tiene: salida, entrada al pasillo (7 casillas) y meta.
@@ -314,9 +314,9 @@ export default {
       if (seat >= 0) {
         const home = s.pieces[seat].map((p, i) => ({ p, i })).filter((x) => x.p === -1);
         inner = `<div class="homeslots">${[0, 1, 2, 3].map((k) => `<div class="slot">${home[k] ? token({ seat, i: home[k].i }) : ''}</div>`).join('')}</div>
-                 <div class="homename">${ctx.avatar(seat)} ${esc(ctx.players[seat])}</div>`;
+                 <div class="homename">${s.teams ? `<span class="hteam" style="--tc:${TEAM_COLORS[s.teams[seat]]}">${TEAM_EMOJI[s.teams[seat]]}</span>` : ''}${ctx.avatar(seat)} ${esc(ctx.players[seat])}</div>${seat === s.turn && !s.over ? '<div class="hturn">👇 ¡Le toca!</div>' : ''}`;
       }
-      cells.push(`<div class="home ${seat === s.turn ? 'turn' : ''}" style="grid-row:${r0 + 1}/span 8;grid-column:${c0 + 1}/span 8;--c:${C.hex};--cl:${C.light}">${inner}</div>`);
+      cells.push(`<div class="home ${seat === s.turn ? 'turn' : ''}" data-col="${col}" style="grid-row:${r0 + 1}/span 8;grid-column:${c0 + 1}/span 8;--c:${C.hex};--cl:${C.light}">${inner}</div>`);
     });
     // meta
     const metaCounts = s.colors.map((col, seat) => ({ col, n: s.pieces[seat].filter((p) => p === META).length }));
@@ -336,7 +336,8 @@ export default {
 
     el.innerHTML = `
       <div class="status">${status}</div>
-      <div class="parchis-wrap theme-${s.board || 'clasico'}"><div class="parchis">${cells.join('')}</div>${THEME_DECOR[s.board] || ''}</div>
+      <div class="pzoom ${zoomed() ? 'zoom' : ''}"><div class="parchis-wrap theme-${s.board || 'clasico'}"><div class="parchis">${cells.join('')}</div>${THEME_DECOR[s.board] || ''}</div></div>
+      <div class="ocazoom"><button class="btn small" data-zoom>${zoomed() ? '🔎 Ver tablero entero' : '🔍 Ampliar tablero'}</button></div>
       <div class="dicebar">
         <button class="die3d ${s.rollId === s.v ? 'rolling' : ''}" data-roll ${myTurn && s.phase === 'roll' ? '' : 'disabled'} style="--c:${curColor.hex}">
           <span>${dieFace}</span>
@@ -345,11 +346,27 @@ export default {
       </div>
     `;
     el.querySelector('[data-roll]').onclick = () => ctx.send({ type: 'roll' });
+    el.querySelector('[data-zoom]').onclick = () => { try { localStorage.setItem('jca.parZoom', zoomed() ? '0' : '1'); } catch {} ctx.ui.pzScroll = null; ctx.rerender(); };
+    const wrap = el.querySelector('.pzoom.zoom');
+    if (wrap) {
+      const ui = ctx.ui;
+      // centra la vista en la ficha que se mueve, o en las fichas / la casa de quien juega
+      const focus = () => {
+        const t = el.querySelector('.pawn.hop') || el.querySelector('.pawn.can') || el.querySelector(`.home[data-col="${s.colors[s.turn]}"]`);
+        if (!t) return;
+        const wr = wrap.getBoundingClientRect(), tr = t.getBoundingClientRect();
+        wrap.scrollTo({ left: wrap.scrollLeft + tr.left - wr.left - wr.width / 2 + tr.width / 2, top: wrap.scrollTop + tr.top - wr.top - wr.height / 2 + tr.height / 2, behavior: ui.pzScroll ? 'smooth' : 'auto' });
+      };
+      if (ui.pzScroll) { wrap.scrollLeft = ui.pzScroll[0]; wrap.scrollTop = ui.pzScroll[1]; }
+      if (ui.pzV !== s.v) { ui.pzV = s.v; requestAnimationFrame(focus); }
+      wrap.addEventListener('scroll', () => { ui.pzScroll = [wrap.scrollLeft, wrap.scrollTop]; }, { passive: true });
+    }
     el.querySelectorAll('[data-move]').forEach((b) => b.onclick = () => ctx.send({ type: 'move', i: +b.dataset.move }));
   },
 };
 
 const usedColors = (s) => new Set(s.colors);
+const zoomed = () => { try { return localStorage.getItem('jca.parZoom') === '1'; } catch { return false; } };
 // decoración de cada tablero temático: cosas que caen y adornos en las esquinas
 const falling = (chars, n) => Array.from({ length: n }, (_, i) => `<span class="fall" style="left:${(i * 37 + 7) % 100}%;animation-delay:-${(i * 1.7) % 9}s;animation-duration:${7 + (i % 4) * 1.5}s;font-size:${14 + (i % 3) * 6}px">${chars[i % chars.length]}</span>`).join('');
 const corners = (a) => `<span class="cdeco c1">${a[0]}</span><span class="cdeco c2">${a[1]}</span><span class="cdeco c3">${a[2]}</span><span class="cdeco c4">${a[3]}</span>`;

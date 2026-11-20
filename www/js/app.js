@@ -8,10 +8,12 @@ import * as sound from './sound.js';
 import * as fx from './fx.js';
 import { esc, PLAYER_COLORS, TEAM_NAMES, TEAM_EMOJI, TEAM_COLORS, GameError } from './util.js';
 import { qrcode } from '../vendor/qrcode.mjs';
+import { VERSION } from './version.js';
 
 const DOWNLOAD_URL = 'https://github.com/espjulian84-cpu/JuegosConAmigos/releases/latest/download/JuegosConAmigos.apk';
 const AVATARS = ['🦊', '🐼', '🐸', '🐯', '🐵', '🐰', '🦄', '🐙', '🐨', '🦁', '🐷', '🐮', '🐔', '🐧', '🐲', '🦖', '👽', '🤖', '🐶', '🐱', '🦉', '🐢', '🦋', '🐝'];
 const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const randCode = (n) => Array.from({ length: n }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('');
 const MAX_PLAYERS = 6;
 
@@ -115,6 +117,14 @@ function hostMsg(connId, m) {
     for (const [cid, ppid] of S.connPid) if (ppid === pid && cid !== connId) S.connPid.delete(cid);
     S.connPid.set(connId, pid);
     broadcastRoom();
+  } else if (m.t === 'chat') {
+    const pid = S.connPid.get(connId);
+    const p = pid && r.players.find((x) => x.pid === pid);
+    if (p) relayChat({ pid, name: p.name, avatar: p.avatar, text: String(m.text || '').slice(0, 80) });
+  } else if (m.t === 'askLobby') {
+    const pid = S.connPid.get(connId);
+    const p = pid && r.players.find((x) => x.pid === pid);
+    if (p && r.gameId) { S.modal = { type: 'asklobby', name: p.name, avatar: p.avatar }; sound.play('invite'); renderModal(); }
   } else if (m.t === 'in') {
     const pid = S.connPid.get(connId);
     if (pid && r.seats) { const seat = r.seats.indexOf(pid); if (seat >= 0) S.rtInputs[seat] = m.i; }
@@ -136,6 +146,33 @@ function hostClose(connId) {
   if (!S.room.gameId) S.room.players = S.room.players.filter((x) => x.pid !== pid); // en la sala de espera, se va
   else p.online = false; // en partida, conserva su sitio para volver
   broadcastRoom();
+}
+
+// ---------- chat ----------
+function sendChat(text) {
+  text = String(text).slice(0, 80);
+  if (S.mode === 'client') { S.conn && S.conn.send({ t: 'chat', text }); return; }
+  relayChat({ pid: me.pid, name: me.name, avatar: me.avatar, text });
+}
+function relayChat(c) {
+  if (S.mode === 'host') S.host.broadcast({ t: 'chat', c });
+  showChat(c);
+}
+function showChat(c) {
+  S.chat = S.chat || [];
+  S.chat.push(c);
+  if (S.chat.length > 60) S.chat.shift();
+  sound.play('invite');
+  let box = document.querySelector('.bubbles');
+  if (!box) { box = document.createElement('div'); box.className = 'bubbles'; document.body.appendChild(box); }
+  const b = document.createElement('div');
+  b.className = 'bubble' + (c.pid === me.pid ? ' mine' : '');
+  b.innerHTML = `<span>${esc(c.avatar)}</span><div><b>${esc(c.name)}</b>${esc(c.text)}</div>`;
+  box.appendChild(b);
+  while (box.children.length > 3) box.firstChild.remove();
+  setTimeout(() => b.classList.add('out'), 4200);
+  setTimeout(() => b.remove(), 4700);
+  const cb = document.querySelector('[data-a="chat"]'); if (cb) fx.shake(cb);
 }
 
 function broadcastRoom() {
@@ -216,13 +253,14 @@ function startGame() {
   const err = validateStart(r);
   if (err) { toast(err); fx.shake(document.querySelector('.startbtn') || app); return; }
   const g = getGame(r.sel);
-  let order = r.players.filter((p) => p.online).map((p) => p.pid);
+  // el orden se sortea: así no empieza siempre quien crea la sala
+  let order = shuffle(r.players.filter((p) => p.online).map((p) => p.pid));
   let teams = null;
   if (r.teamMode) {
     // sienta a los equipos alternados (compañeros enfrente) y numera los equipos 0,1,2…
     const groups = new Map();
     order.forEach((pid) => { const t = r.teams[pid] ?? 0; if (!groups.has(t)) groups.set(t, []); groups.get(t).push(pid); });
-    const lists = [...groups.values()];
+    const lists = shuffle([...groups.values()]);
     order = []; teams = [];
     for (let k = 0; order.length < r.players.filter((p) => p.online).length; k++) {
       lists.forEach((l, ti) => { if (l[k]) { order.push(l[k]); teams.push(ti); } });
@@ -285,6 +323,7 @@ function clientMsg(m) {
   else if (m.t === 'rt') { const g = S.room && S.room.gameId && getGame(S.room.gameId); if (g && g.onSnap) g.onSnap(m.snap); }
   else if (m.t === 'err') { toast(m.msg); if (m.fatal) leave(true); }
   else if (m.t === 'ping') S.conn && S.conn.send({ t: 'pong' });
+  else if (m.t === 'chat') showChat(m.c);
   else if (m.t === 'bye') { toast('El anfitrión ha cerrado la sala'); leave(true); }
 }
 function clientClosed() {
@@ -309,7 +348,7 @@ function leave(silent) {
   clearTimeout(timerHandle); timerId = null;
   const wasDemo = S.mode === 'demo';
   S.mode = null; S.room = null; S.host = null; S.conn = null; S.reconnecting = false;
-  S.connPid.clear(); S.screen = 'home'; S.modal = null;
+  S.connPid.clear(); S.screen = 'home'; S.modal = null; S.chat = []; S.teamDrawSeen = null;
   if (wasDemo) S.tab = 'games';
   keepAwake(false);
   render();
@@ -376,6 +415,7 @@ function stopRtLoop() { if (S.rtLoop) { clearInterval(S.rtLoop); S.rtLoop = null
 function onRoomUpdated() {
   const r = S.room;
   if (!r) return;
+  if (r.teamDraw && r.teamDraw !== S.teamDrawSeen) { if (S.teamDrawSeen != null || S.mode === 'host' || S.mode === 'local') setTimeout(showTeamDraw, 50); S.teamDrawSeen = r.teamDraw; }
   const rg = r.gameId && r.state && getGame(r.gameId);
   if (rg && rg.realtime) {
     if ((S.mode === 'host' || S.mode === 'local') && !r.state.over && (!S.rtLoop || S.rtGameNo !== r.gameNo)) startRtLoop();
@@ -384,10 +424,66 @@ function onRoomUpdated() {
     S.rtDirty = false;
   }
   if (r.gameId && r.state) {
-    if (S.screen !== 'game' || S.gameNo !== r.gameNo) { S.screen = 'game'; S.ui = {}; S.gameNo = r.gameNo; S.curtainSeat = null; S.lastFx = null; S.lastV = null; S.wasMine = false; }
+    if (S.screen !== 'game' || S.gameNo !== r.gameNo) { if (S.mode !== 'demo') setTimeout(showStartDraw, 300); S.screen = 'game'; S.ui = {}; S.gameNo = r.gameNo; S.curtainSeat = null; S.lastFx = null; S.lastV = null; S.wasMine = false; }
     playEffects();
   } else if (S.screen === 'game' || S.screen === 'connecting') S.screen = 'lobby';
   render();
+}
+
+// Animación de sorteo: las figuritas van pasando y se para en quien empieza
+function showStartDraw() {
+  const r = S.room;
+  if (!r || !r.state) return;
+  const g = getGame(r.gameId);
+  const first = g.realtime ? null : g.turnOf(r.state);
+  if (first == null) return;
+  const ps = r.seats.map((pid) => r.players.find((p) => p.pid === pid) || { name: '?', avatar: '❔' });
+  const d = document.createElement('div');
+  d.className = 'drawov';
+  d.innerHTML = `<div class="drawbox"><h3>🎲 ¿Quién empieza?</h3><div class="drawrow">${ps.map((p, i) => `<div class="dav" data-i="${i}"><span>${p.avatar}</span><b>${esc(p.name)}</b></div>`).join('')}</div><div class="drawres"></div></div>`;
+  document.body.appendChild(d);
+  const items = [...d.querySelectorAll('.dav')];
+  const total = items.length * 3 + first + 1;
+  let k = 0, delay = 70;
+  const tick = () => {
+    items.forEach((it) => it.classList.remove('hl'));
+    items[k % items.length].classList.add('hl');
+    sound.play('click');
+    k++;
+    if (k < total) { delay *= 1.09; setTimeout(tick, delay); return; }
+    const why = g.id === 'domino' ? ' (tiene el doble más alto)' : '';
+    d.querySelector('.drawres').innerHTML = `¡Empieza <b>${esc(ps[first].name)}</b>!${why}`;
+    sound.play('special');
+    const c = fx.center(items[first]); fx.sparkle(c.x, c.y, '#ffe066', 22, 1.5);
+    setTimeout(() => d.classList.add('out'), 1500);
+    setTimeout(() => d.remove(), 1900);
+  };
+  d.onclick = () => d.remove();
+  tick();
+}
+
+// Animación de sorteo de equipos (la ven todos)
+function showTeamDraw() {
+  const r = S.room;
+  const d = document.createElement('div');
+  d.className = 'drawov';
+  const k = Math.max(...r.players.map((p) => r.teams[p.pid] ?? 0)) + 1;
+  d.innerHTML = `<div class="drawbox"><h3>🎲 Sorteo de equipos</h3><div class="tdraw">${r.players.map((p) => `<div class="tdp" data-t="${r.teams[p.pid] ?? 0}"><span>${p.avatar}</span><b>${esc(p.name)}</b><i>❔</i></div>`).join('')}</div></div>`;
+  document.body.appendChild(d);
+  const els = [...d.querySelectorAll('.tdp')];
+  els.forEach((el, i) => {
+    let n = 0;
+    const spin = setInterval(() => { const t = n++ % k; el.style.setProperty('--tc', TEAM_COLORS[t]); el.querySelector('i').textContent = TEAM_EMOJI[t]; }, 90);
+    setTimeout(() => {
+      clearInterval(spin);
+      const t = +el.dataset.t;
+      el.style.setProperty('--tc', TEAM_COLORS[t]); el.querySelector('i').textContent = TEAM_EMOJI[t] + ' ' + TEAM_NAMES[t];
+      el.classList.add('done'); sound.play('place');
+    }, 900 + i * 450);
+  });
+  setTimeout(() => { sound.play('special'); d.classList.add('out'); }, 900 + els.length * 450 + 1200);
+  setTimeout(() => d.remove(), 900 + els.length * 450 + 1600);
+  d.onclick = () => d.remove();
 }
 
 function mySeat() {
@@ -502,7 +598,7 @@ function homeHTML() {
         <button class="btn big c3" data-a="local">📱 Jugar todos en este móvil</button>
       </div>
       <div class="gamesmini">${GAMES.map((g) => `<div class="gmini" style="--gc:${g.color}"><span>${g.icon}</span>${g.name}</div>`).join('')}</div>
-      <p class="foot">Los móviles se conectan sin cables (wifi o datos). Tu código de amigo: <b>${me.pid}</b></p>
+      <p class="foot">Los móviles se conectan por internet, estéis donde estéis (wifi o datos). Tu código de amigo: <b>${me.pid}</b><br>Versión ${VERSION}</p>
       <button class="btn ghost" data-a="shareapp">📲 Pasar la app a un amigo</button>`;
   } else if (S.tab === 'games') {
     body = `
@@ -543,6 +639,13 @@ function homeHTML() {
         <button class="iconbtn" data-delfriend="${i}" title="Borrar">🗑️</button></div>`).join('') : '<p class="hint center">Aún no tienes amigos guardados 🥲</p>'}</div>`;
   }
   return `<div class="home">${body}</div>${tabs}`;
+}
+
+function teamColumns(r, canEdit) {
+  const k = r.players.length >= 6 && getGame(r.sel).teams !== 'pairs4' ? 3 : 2;
+  return `<div class="teamcols" style="--k:${k}">${Array.from({ length: k }, (_, t) => `
+    <div class="teamcol" style="--tc:${TEAM_COLORS[t]}"><div class="tchead">${TEAM_EMOJI[t]} ${TEAM_NAMES[t]}</div>
+    ${r.players.filter((p) => (r.teams[p.pid] ?? 0) === t).map((p) => `<button class="tcp" ${canEdit ? `data-team="${p.pid}"` : 'disabled'}>${p.avatar} ${esc(p.name)}</button>`).join('') || '<div class="tcempty">—</div>'}</div>`).join('')}</div>`;
 }
 
 function teamChip(r, p, canEdit) {
@@ -590,18 +693,16 @@ function lobbyHTML() {
       if (op.type === 'bool') return `<div class="teamrow"><label class="switch" data-opt="${g.id}|${op.id}|0"><input type="checkbox" ${cur ? 'checked' : ''} disabled><span></span> ${op.label}</label></div>`;
       return `<div class="optchoice"><div class="optlabel">${op.label}</div><div class="chips">${op.choices.map((c, ci) => `<button class="chip ${c.v === cur ? 'on' : ''}" data-opt="${g.id}|${op.id}|${ci}">${c.label}</button>`).join('')}</div></div>`;
     }).join('')}
-    ${g.teams ? `<div class="teamrow">
-      <label class="switch"><input type="checkbox" data-a="teammode" ${r.teamMode ? 'checked' : ''}><span></span> 🤝 Por equipos${g.teams === 'pairs4' ? ' (parejas)' : ''}</label>
-      ${r.teamMode ? '<button class="btn small" data-a="shuffleteams">🔀 Al azar</button>' : ''}
-    </div>` : ''}
+    ${g.teams ? `<div class="seg"><button class="${r.teamMode ? '' : 'on'}" data-mode="solo">👤 Cada uno por su cuenta</button><button class="${r.teamMode ? 'on' : ''}" data-mode="teams">🤝 Por equipos${g.teams === 'pairs4' ? ' (parejas)' : ''}</button></div>
+      ${r.teamMode ? `${teamColumns(r, true)}<div class="row center"><button class="btn c3" data-a="shuffleteams">🎲 Sortear equipos</button></div><p class="hint light">Toca a un jugador para cambiarlo de equipo.</p>` : ''}` : ''}
     ${local && r.players.length < MAX_PLAYERS ? '<button class="btn ghost" data-a="addlocal">➕ Añadir jugador</button>' : ''}
     <button class="btn big startbtn ${err ? 'disabled' : 'pulse'}" data-a="start">${err ? '⏳ ' + esc(err) : `▶ ¡Empezar ${g.name}!`}</button>`
-    : `<div class="card waiting"><div class="gpi big">${g.icon}</div><div>Juego elegido: <b>${g.name}</b>${r.teamMode ? ' · 🤝 por equipos' : ''}</div>
+    : `${r.teamMode && g.teams ? teamColumns(r, false) : ''}<div class="card waiting"><div class="gpi big">${g.icon}</div><div>Juego elegido: <b>${g.name}</b>${r.teamMode ? ' · 🤝 por equipos' : ''}</div>
       <div class="hint">${(g.options || []).map((op) => { const v = gameOptions(r, g)[op.id]; return op.type === 'bool' ? `${op.label}: ${v ? 'sí' : 'no'}` : `${op.label}: ${op.choices.find((c) => c.v === v)?.label}`; }).join(' · ')}</div>
       <button class="btn small" data-rules="${g.id}">📖 Cómo se juega</button><div class="dots">Esperando a que el anfitrión empiece<span>.</span><span>.</span><span>.</span></div></div>`;
 
   return `
-    <header class="topbar"><button class="iconbtn" data-a="leave">←</button><div class="grow title">${local ? '📱 En este móvil' : '🏠 Sala de espera'}</div><button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button></header>
+    <header class="topbar"><button class="iconbtn" data-a="leave">←</button><div class="grow title">${local ? '📱 En este móvil' : '🏠 Sala de espera'}</div>${local ? '' : '<button class="iconbtn" data-a="chat">💬</button>'}<button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button></header>
     ${S.reconnecting ? '<div class="reconnect">📡 Reconectando…</div>' : ''}
     <div class="lobby">
       ${invite}
@@ -675,6 +776,7 @@ function renderGame(before) {
       <button class="iconbtn" data-a="leave">✕</button>
       <div class="grow title">${g.icon} ${demo ? 'Ejemplo: ' : ''}${g.name}</div>
       ${r.code ? `<span class="codepill">${r.code}</span>` : ''}
+      ${demo || S.mode === 'local' ? '' : '<button class="iconbtn" data-a="chat">💬</button>'}
       ${demo ? '' : `<button class="iconbtn" data-rules="${g.id}">❓</button>`}
       <button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button>
     </header>
@@ -690,11 +792,33 @@ function renderGame(before) {
   const board = document.getElementById('board');
   if (board) {
     g.render(board, ctx.state, ctx);
+    decorateTeams(board, ctx.state, g);
     const skip = (S.pendingFx && S.pendingFx.f.noFlip) || [];
     fx.animateFrom(board, before, skip);
     runPendingFx(board);
   } else S.pendingFx = null;
   bind();
+}
+
+// En partidas por equipos, los marcadores se agrupan: Luna arriba a la derecha y Sol abajo a la izquierda
+function decorateTeams(board, s, g) {
+  if (!s.teams || g.id === 'muros') return;
+  const bar = board.querySelector('.players');
+  if (!bar) return;
+  const chips = [...bar.querySelectorAll(':scope > .pchip')];
+  if (chips.length !== s.teams.length) return;
+  const groups = {};
+  chips.forEach((c, i) => { (groups[s.teams[i]] = groups[s.teams[i]] || []).push(c); });
+  bar.classList.add('teambar');
+  bar.innerHTML = '';
+  [1, 0, 2].filter((t) => groups[t]).forEach((t) => {
+    const box = document.createElement('div');
+    box.className = `teambox t${t}`;
+    box.style.setProperty('--tc', TEAM_COLORS[t]);
+    box.innerHTML = `<div class="tbname">${TEAM_EMOJI[t]} ${TEAM_NAMES[t]}</div>`;
+    groups[t].forEach((c) => box.appendChild(c));
+    bar.appendChild(box);
+  });
 }
 
 // barras de tiempo ([data-timer]) que dibujan los juegos
@@ -785,9 +909,35 @@ function renderModal() {
       <button class="btn" data-close>Cerrar</button></div>`;
     d.querySelectorAll('[data-demo]').forEach((b) => b.onclick = () => { sound.play('click'); startDemo(b.dataset.demo); });
   } else if (m.type === 'confirmleave') {
-    d.innerHTML = `<div class="sheet"><h3>¿Salir de la ${S.mode === 'local' ? 'partida' : 'sala'}?</h3>${S.mode === 'host' ? '<p class="hint">Eres el anfitrión: la sala se cerrará para todos.</p>' : ''}
-      <div class="row"><button class="btn c1" data-yes>Salir</button><button class="btn" data-close>Seguir jugando</button></div></div>`;
+    const inGame = S.screen === 'game';
+    const b = [];
+    if (inGame && (S.mode === 'host' || S.mode === 'local')) b.push('<button class="btn big c3" data-tolobby>🏠 Volver a la sala (el grupo sigue)</button>');
+    if (inGame && S.mode === 'client') b.push('<button class="btn big c3" data-ask>🙋 Pedir al anfitrión volver a la sala</button>');
+    b.push(`<button class="btn big c1" data-yes>${S.mode === 'host' ? '🚪 Cerrar el grupo para todos' : S.mode === 'local' ? '🚪 Salir al inicio' : '🚪 Salir del grupo'}</button>`);
+    b.push(`<button class="btn big" data-close>${inGame ? '🎮 Seguir jugando' : 'Cancelar'}</button>`);
+    d.innerHTML = `<div class="sheet"><h3>${inGame ? '¿Qué quieres hacer?' : '¿Salir de la sala?'}</h3><div class="stack">${b.join('')}</div></div>`;
     d.querySelector('[data-yes]').onclick = () => leave();
+    const tl = d.querySelector('[data-tolobby]'); if (tl) tl.onclick = () => { S.modal = null; d.remove(); backToLobby(); };
+    const ask = d.querySelector('[data-ask]'); if (ask) ask.onclick = () => { S.conn && S.conn.send({ t: 'askLobby' }); S.modal = null; d.remove(); toast('🙋 Petición enviada al anfitrión'); };
+  } else if (m.type === 'asklobby') {
+    d.innerHTML = `<div class="sheet"><div class="bigemoji">${esc(m.avatar)}</div><h3>${esc(m.name)} quiere volver a la sala</h3><div class="stack"><button class="btn big c3" data-tolobby>🏠 Volver todos a la sala</button><button class="btn big" data-close>🎮 Seguir jugando</button></div></div>`;
+    d.querySelector('[data-tolobby]').onclick = () => { S.modal = null; d.remove(); backToLobby(); };
+  } else if (m.type === 'chat') {
+    const laughs = ['Jajaja 😂', 'JAJAJA 🤣', 'Jejeje 😏', 'Jiji 🤭', 'Muajaja 😈'];
+    const quick = ['¡Hola! 👋', '¡Bien jugado! 👏', '¡Te voy a ganar! 😎', '¡Qué suerte! 🍀', '¡Venga, que te toca! ⏰', '¡Nooo! 😱', '¡Toma ya! 💪', 'Jajaja 😂', '¡Gracias! 🙏', 'Uff… 😅', '¡Revancha! 🔁', '¡Buena partida! 🤝'];
+    const emos = ['😂', '😎', '😡', '😱', '👏', '🔥', '❤️', '🤞', '🥳', '😭', '🙈', '👍', '😴', '🤯', '💩', '🎉'];
+    d.innerHTML = `<div class="sheet chatsheet"><h3>💬 Chat</h3>
+      <div class="chatlog">${(S.chat || []).slice(-30).map((c) => `<div class="cmsg ${c.pid === me.pid ? 'mine' : ''}"><span>${esc(c.avatar)}</span><div><b>${esc(c.name)}</b>${esc(c.text)}</div></div>`).join('') || '<p class="hint center">Aún no hay mensajes</p>'}</div>
+      <div class="chips quick laughs">${laughs.map((q) => `<button class="chip" data-say="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+      <div class="chips quick">${quick.map((q) => `<button class="chip" data-say="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+      <div class="emogrid">${emos.map((e) => `<button data-say="${e}">${e}</button>`).join('')}</div>
+      <details class="typeit"><summary>✏️ Escribir otra cosa</summary><div class="row"><input id="chatin" maxlength="80" placeholder="Escribe un mensaje…"><button class="btn c2" data-send>Enviar</button></div></details>
+      <button class="btn" data-close>Cerrar</button></div>`;
+    const send = (t) => { sendChat(t); S.modal = null; d.remove(); };
+    d.querySelectorAll('[data-say]').forEach((b) => b.onclick = () => send(b.dataset.say));
+    d.querySelector('[data-send]').onclick = () => { const v = d.querySelector('#chatin').value.trim(); if (v) send(v); };
+    d.querySelector('#chatin').onkeydown = (e) => { if (e.key === 'Enter') d.querySelector('[data-send]').click(); };
+    const log = d.querySelector('.chatlog'); log.scrollTop = log.scrollHeight;
   }
   d.addEventListener('click', (e) => { if (e.target === d || e.target.closest('[data-close]')) { S.modal = null; d.remove(); } });
   document.body.appendChild(d);
@@ -814,6 +964,7 @@ function bind() {
       case 'uncurtain': S.curtainSeat = getGame(r.gameId).turnOf(r.state); render(); break;
       case 'demoagain': { const id = r.gameId; clearTimeout(S.demo.timer); startDemo(id); break; }
       case 'leave': if (S.screen === 'connecting' || S.mode === 'demo') leave(true); else { S.modal = { type: 'confirmleave' }; renderModal(); } break;
+      case 'chat': S.modal = { type: 'chat' }; renderModal(); break;
       case 'mute': sound.toggleMute(); el.textContent = sound.isMuted() ? '🔇' : '🔊'; break;
       case 'start': startGame(); break;
       case 'rematch': rematch(); break;
@@ -830,9 +981,10 @@ function bind() {
       })(); break;
       case 'invitefriends': S.modal = { type: 'invitefriends' }; renderModal(); break;
       case 'shuffleteams': {
-        const ps = r.players.filter((p) => p.online).map((p) => p.pid).sort(() => Math.random() - 0.5);
-        const k = getGame(r.sel).teams === 'pairs4' || ps.length % 3 ? 2 : (ps.length >= 6 ? 3 : 2);
+        const ps = shuffle(r.players.filter((p) => p.online).map((p) => p.pid));
+        const k = r.players.length >= 6 && getGame(r.sel).teams !== 'pairs4' && ps.length % 3 === 0 ? 3 : 2;
         ps.forEach((pid, i) => { r.teams[pid] = i % k; });
+        r.teamDraw = (r.teamDraw || 0) + 1; // todos ven la animación del sorteo
         broadcastRoom(); break;
       }
       case 'addlocal': {
@@ -867,6 +1019,11 @@ function bind() {
     r.opts[gid][oid] = op.type === 'bool' ? !(gameOptions(r, getGame(gid))[oid]) : op.choices[+val].v;
     sound.play('click'); broadcastRoom();
   });
+  on('[data-mode]', (el) => {
+    const r = S.room; r.teamMode = el.dataset.mode === 'teams';
+    if (r.teamMode && !Object.keys(r.teams).length) r.players.forEach((p, i) => { r.teams[p.pid] = i % 2; });
+    sound.play('click'); broadcastRoom();
+  });
   on('[data-sel]', (el) => { S.room.sel = el.dataset.sel; sound.play('click'); broadcastRoom(); });
   on('[data-team]', (el) => { const r = S.room; const pid = el.dataset.team; r.teams[pid] = ((r.teams[pid] ?? 0) + 1) % (r.players.length >= 6 ? 3 : 2); sound.play('click'); broadcastRoom(); });
   on('[data-delwish]', (el) => { wishlist.splice(+el.dataset.delwish, 1); LS.set('wishlist', wishlist); render(); });
@@ -888,4 +1045,4 @@ window.addEventListener('popstate', () => {
 // Enlace de invitación (?sala=CODE): ir directo a unirse
 render();
 if (params.get('sala') && me.name && !TEST) joinRoom(params.get('sala'));
-window.__jca = { S, me }; // para depurar
+window.__jca = { S, me, doAction }; // para depurar y para las pruebas automáticas
