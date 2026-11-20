@@ -86,7 +86,7 @@ async function createRoom() {
     try {
       S.host = await net.hostRoom(code, { onConn: () => {}, onMsg: hostMsg, onClose: hostClose, onError: (e) => console.warn(e) });
       S.mode = 'host';
-      S.room = { code, hostPid: me.pid, players: [{ ...me, online: true }], sel: GAMES[0].id, teamMode: false, teams: {}, opts: {}, gameId: null, seats: null, state: null, gameNo: 0 };
+      S.room = { code, hostPid: me.pid, hostV: VERSION, players: [{ ...me, online: true, v: VERSION }], sel: GAMES[0].id, teamMode: false, teams: {}, opts: {}, gameId: null, seats: null, state: null, gameNo: 0 };
       S.screen = 'lobby'; keepAwake(true); render();
       return;
     } catch (e) {
@@ -113,6 +113,7 @@ function hostMsg(connId, m) {
     }
     p.name = String(m.name || 'Jugador').slice(0, 16);
     p.avatar = String(m.avatar || '🙂').slice(0, 4);
+    p.v = String(m.v || 'antigua').slice(0, 12);
     p.online = true;
     for (const [cid, ppid] of S.connPid) if (ppid === pid && cid !== connId) S.connPid.delete(cid);
     S.connPid.set(connId, pid);
@@ -314,7 +315,7 @@ async function joinRoom(code) {
 async function connectClient() {
   S.conn = await net.joinRoom(S.code, { onMsg: clientMsg, onClose: clientClosed });
   S.lastMsg = Date.now();
-  S.conn.send({ t: 'hello', pid: me.pid, name: me.name, avatar: me.avatar });
+  S.conn.send({ t: 'hello', pid: me.pid, name: me.name, avatar: me.avatar, v: VERSION });
 }
 function clientMsg(m) {
   if (S.mode !== 'client') return;
@@ -540,6 +541,27 @@ function runPendingFx(board) {
 }
 
 // ======================================================================
+//  ACTUALIZACIONES: avisa si en GitHub hay una versión más nueva que la instalada
+// ======================================================================
+const verNum = (v) => String(v || '').replace(/^v/, '').split('.').map((n) => +n || 0);
+const newer = (a, b) => { const x = verNum(a), y = verNum(b); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; };
+S.update = null;
+async function checkUpdate() {
+  if (!/^\d/.test(VERSION) || TEST) return;
+  try {
+    const r = await fetch('https://api.github.com/repos/espjulian84-cpu/JuegosConAmigos/releases/latest', { cache: 'no-store' });
+    if (!r.ok) return;
+    const j = await r.json();
+    const v = String(j.tag_name || '').replace(/^v/, '');
+    if (!newer(v, VERSION)) return;
+    const asset = (j.assets || []).find((a) => a.name === `JuegosConAmigos-${v}.apk`) || (j.assets || []).find((a) => /\.apk$/.test(a.name));
+    S.update = { v, url: asset ? asset.browser_download_url : DOWNLOAD_URL };
+    if (S.screen === 'home') render();
+  } catch {}
+}
+setTimeout(checkUpdate, 1500);
+
+// ======================================================================
 //  INVITACIONES
 // ======================================================================
 const stopInvites = net.listenInvites(me.pid, (m) => {
@@ -593,6 +615,7 @@ function homeHTML() {
         <h1>Juegos con Amigos</h1>
         <p>Hasta 6 jugadores, cada uno en su móvil</p>
       </div>
+      ${S.update ? `<a class="card updcard" href="${S.update.url}" target="_blank" rel="noopener"><span>🆕</span><div class="grow"><b>¡Hay una versión nueva! (${S.update.v})</b><small>Tienes la ${VERSION}. Toca para descargarla e instálala encima.</small></div><span>⬇️</span></a>` : ''}
       <div class="card me">
         <button class="bigavatar" data-a="avatar" title="Cambiar avatar">${me.avatar}</button>
         <div class="grow"><label>Tu nombre</label><input id="name" maxlength="16" placeholder="¿Cómo te llamas?" value="${esc(me.name)}"></div>
@@ -668,7 +691,7 @@ function lobbyHTML() {
   const players = r.players.map((p, i) => `
     <div class="lplayer ${p.online ? '' : 'off'}" style="--pc:${PLAYER_COLORS[i]}">
       ${local ? `<button class="lavatar" data-lavatar="${i}">${p.avatar}</button>` : `<span class="lavatar">${p.avatar}</span>`}
-      <div class="grow">${local ? `<input class="lname" data-lname="${i}" maxlength="16" value="${esc(p.name)}">` : `<b>${esc(p.name)}</b>${p.pid === r.hostPid ? ' 👑' : ''}${p.pid === me.pid ? ' <small>(tú)</small>' : ''}`}</div>
+      <div class="grow">${local ? `<input class="lname" data-lname="${i}" maxlength="16" value="${esc(p.name)}">` : `<b>${esc(p.name)}</b>${p.pid === r.hostPid ? ' 👑' : ''}${p.pid === me.pid ? ' <small>(tú)</small>' : ''}${p.v && r.hostV && p.v !== r.hostV ? `<div class="verwarn">⚠️ Tiene otra versión (${esc(p.v)}). ¡Actualizad todos a la misma!</div>` : ''}`}</div>
       ${teamChip(r, p, isHost)}
       ${local && i > 0 ? `<button class="iconbtn" data-rmlocal="${i}">✖</button>` : ''}
     </div>`).join('');

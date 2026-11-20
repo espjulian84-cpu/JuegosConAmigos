@@ -654,3 +654,6 @@ canvas.race { display: block; width: 100%; height: min(62vh, 560px); touch-actio
 .dicebar { position: sticky; bottom: 8px; z-index: 6; background: rgba(43, 18, 102, .88); border-radius: 22px; padding: 8px 12px; backdrop-filter: blur(6px); box-shadow: 0 8px 20px rgba(0,0,0,.35); }
 .dicebar .log { max-height: 66px; overflow: hidden; }
 @media (orientation: portrait) { .pzoom .parchis-wrap { aspect-ratio: 1 / 1.28; } }
+.updcard { display: flex; align-items: center; gap: 10px; margin: 10px 0; text-decoration: none; color: inherit; background: linear-gradient(135deg, #fff3bf, #fff); border: 3px solid #fab005; animation: pulse 1.6s infinite; }
+.updcard span { font-size: 1.8rem; } .updcard small { display: block; color: var(--muted); }
+.verwarn { color: #c92a2a; font-size: .8rem; font-weight: 700; }
