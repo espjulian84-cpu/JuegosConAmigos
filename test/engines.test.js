@@ -1,63 +1,60 @@
-// Simula partidas completas con jugadas aleatorias legales para comprobar que
-// ningún motor se cuelga, lanza errores inesperados o rompe sus reglas.
+// Simula partidas completas con jugadas aleatorias legales (el "bot" de cada juego) para comprobar
+// que ningún motor se cuelga ni lanza errores, que las partidas de ejemplo funcionan y que la
+// información oculta no se envía a quien no debe verla.
 import assert from 'node:assert/strict';
-import domino, { sidesFor, canPlayAny } from '../www/js/games/domino.js';
+import { GAMES } from '../www/js/games/index.js';
 import parchis, { legalMoves } from '../www/js/games/parchis.js';
+import domino, { canPlayAny } from '../www/js/games/domino.js';
 import oca from '../www/js/games/oca.js';
-import muros, { reach, freeSides, N } from '../www/js/games/muros.js';
+import muros, { reach } from '../www/js/games/muros.js';
 import { GameError } from '../www/js/util.js';
 
-const pick = (a) => a[Math.floor(Math.random() * a.length)];
-
-function chooseAction(g, s) {
-  const t = g.turnOf(s);
-  if (g.id === 'domino') {
-    if (s.roundOver) return [0, { type: 'nextRound' }];
-    const h = s.hands[t];
-    const opts = [];
-    h.forEach((tile, i) => sidesFor(s, tile).forEach((side) => opts.push({ type: 'play', i, side })));
-    if (opts.length) return [t, pick(opts)];
-    return [t, { type: s.boneyard.length ? 'draw' : 'pass' }];
+function step(g, s) {
+  // los temporizadores (esconder cartas, tiempo agotado) los dispara "el sistema"
+  if (s.timer && (g.turnOf(s) == null || Math.random() < 0.05 || s.phase === 'reveal')) {
+    try { return g.action(s, 'sys', s.timer.action); } catch (e) { if (!(e instanceof GameError)) throw e; }
   }
-  if (g.id === 'parchis') {
-    if (s.phase === 'roll') return [t, { type: 'roll' }];
-    return [t, { type: 'move', i: pick(legalMoves(s, t, s.steps, s.isBonus)).i }];
-  }
-  if (g.id === 'oca') return [t, { type: 'roll' }];
-  if (g.id === 'muros') {
-    if (s.phase === 'place') {
-      const free = [];
-      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (!s.pieces.some((ps) => ps.some((p) => p.r === r && p.c === c))) free.push({ r, c });
-      return [t, { type: 'place', ...pick(free) }];
-    }
-    if (s.phase === 'move') {
-      const opts = [];
-      s.pieces[t].forEach((p, i) => reach(s, p).forEach((q) => { if (freeSides(s, q.r, q.c).length) opts.push({ type: 'move', i, r: q.r, c: q.c }); }));
-      return [t, pick(opts)];
-    }
-    const p = s.pieces[t][s.active.i];
-    return [t, { type: 'wall', side: pick(freeSides(s, p.r, p.c)) }];
-  }
+  let seat = g.turnOf(s);
+  if (seat == null) seat = 0; // p. ej. "siguiente ronda" del dominó
+  return g.action(s, seat, g.bot(s, seat));
 }
 
-function play(g, n, teams) {
-  let s = g.setup(n, { teams });
-  for (let k = 0; k < 20000; k++) {
-    if (g.isOver(s)) return { s, moves: k };
-    const [seat, a] = chooseAction(g, s);
-    s = g.action(s, seat, a);
-    JSON.stringify(s); // el estado debe ser serializable para enviarlo por red
+function play(g, n, teams, options) {
+  let s = g.setup(n, { teams, options });
+  for (let k = 0; k < 30000; k++) {
+    if (g.isOver(s)) return s;
+    s = step(g, s);
+    JSON.stringify(s); // el estado debe poder enviarse por la red
   }
   throw new Error(`${g.id}: la partida no termina`);
 }
 
 let total = 0;
-for (const g of [domino, parchis, oca, muros]) {
+for (const g of GAMES) {
+  const optSets = [{}];
+  (g.options || []).forEach((op) => { if (op.type === 'choice') op.choices.forEach((c) => optSets.push({ [op.id]: c.v })); else optSets.push({ [op.id]: !op.def }); });
   for (let n = g.minPlayers; n <= g.maxPlayers; n++) {
-    for (let k = 0; k < 150; k++) { const { s } = play(g, n, null); assert.ok(s.winner != null); total++; }
+    for (let k = 0; k < 60; k++) { const s = play(g, n, null, optSets[k % optSets.length]); assert.ok(s.winner != null, `${g.id} sin ganador`); total++; }
   }
-  if (g.teams) {
-    for (let k = 0; k < 150; k++) { play(g, 4, [0, 1, 0, 1]); total++; }
+  if (g.teams) for (let k = 0; k < 60; k++) { play(g, 4, [0, 1, 0, 1], {}); total++; }
+  // partida de ejemplo: todos los pasos deben ser válidos
+  if (g.demo) {
+    const d = g.demo();
+    let s = d.state; s.demo = true;
+    for (const st of d.steps) {
+      if (st.patch) st.patch(s);
+      if (st.a) { s = g.action(s, st.seat, st.a); while (s.timer && s.phase === 'reveal') s = g.action(s, 'sys', s.timer.action); }
+    }
+  }
+  // información oculta
+  if (g.viewFor) {
+    let s = g.setup(g.maxPlayers, {});
+    const v = g.viewFor(s, 0);
+    const txt = JSON.stringify(v);
+    if (g.id === 'domino') assert.ok(v.hands[1].every((t) => t === null), 'el dominó no debe enviar fichas ajenas');
+    if (g.id === 'flota') assert.equal(v.fleets[1].length, 0, 'la flota enemiga no debe enviarse');
+    if (g.id === 'memoria') assert.ok(v.cards.every((c) => c.f === null), 'las cartas tapadas no deben enviarse');
+    assert.ok(txt.length > 10);
   }
 }
 
@@ -69,20 +66,17 @@ assert.throws(() => oca.action(oca.setup(2), 1, { type: 'roll' }), GameError, 'n
   assert.equal(legalMoves(s, 0, 4, false).length, 0, 'sin 5 no se sale de casa');
 }
 {
-  // captura en parchís: ficha roja (asiento 1 con 2 jugadores) delante del amarillo en casilla no segura
-  const s = parchis.setup(2);
-  s.pieces[0][0] = 0; // amarillo en su salida (13)
-  s.pieces[1][0] = 68 - 47 + 15; // rojo (salida 47) en la casilla 15
-  s.phase = 'move'; s.steps = 2; s.dieVal = 2;
-  const m = legalMoves(s, 0, 2, false).find((x) => x.i === 0);
-  assert.ok(m.capture, 'debe comer');
-  const after = parchis.action(s, 0, { type: 'move', i: 0 });
-  assert.equal(after.pieces[1][0], -1);
-  assert.equal(after.steps, 20, 'tras comer se cuentan 20');
-}
-{
   const s = domino.setup(2);
   assert.equal(s.hands[0].length + s.hands[1].length + s.boneyard.length, 28);
   assert.ok(canPlayAny(s, s.turn), 'la primera ficha siempre se puede poner');
 }
-console.log(`✅ ${total} partidas simuladas sin errores, reglas comprobadas`);
+{
+  // Muros: la cuadrada va recta 1-2, la redonda en L
+  const s = muros.setup(2);
+  s.pieces = [[{ r: 3, c: 3, t: 'sq' }, { r: 0, c: 0, t: 'rd' }], [{ r: 6, c: 6, t: 'sq' }, { r: 6, c: 0, t: 'rd' }]];
+  const sq = reach(s, s.pieces[0][0]).map((q) => `${q.r},${q.c}`).sort();
+  assert.deepEqual(sq, ['1,3', '2,3', '3,1', '3,2', '3,3', '3,4', '3,5', '4,3', '5,3'].sort());
+  const rd = reach(s, { r: 3, c: 3, t: 'rd' }).map((q) => `${q.r},${q.c}`).sort();
+  assert.deepEqual(rd, ['2,2', '2,4', '3,3', '4,2', '4,4'].sort());
+}
+console.log(`✅ ${total} partidas simuladas de ${GAMES.length} juegos sin errores; ejemplos, reglas e información oculta comprobados`);

@@ -1,4 +1,5 @@
 import { clone, die, esc, fail, pushLog, sameTeam } from '../util.js';
+import { pieceSVG, PIECE_CHOICES } from './pieces.js';
 
 // Tablero de 68 casillas. Cada color tiene: salida, entrada al pasillo (7 casillas) y meta.
 // Posición de una ficha = progreso: -1 casa, 0..63 anillo (desde su salida), 64..70 pasillo, 71 meta.
@@ -98,12 +99,98 @@ export default {
   maxPlayers: 4,
   blurb: 'Saca con 5, come y cuenta 20, y llega a casa con tus 4 fichas. ¡Cuidado con las barreras!',
 
+  options: [{ id: 'board', label: '🎨 Tablero', type: 'choice', def: 'clasico', choices: [
+    { v: 'clasico', label: '🎲 Clásico' }, { v: 'primavera', label: '🌸 Primavera' }, { v: 'verano', label: '☀️ Verano' },
+    { v: 'otono', label: '🍂 Otoño' }, { v: 'invierno', label: '❄️ Invierno' }] },
+  { id: 'ficha', label: '🎯 Fichas', type: 'choice', def: 'peon', choices: PIECE_CHOICES }],
+  rules: `
+    <ol>
+      <li>Cada jugador tiene 4 fichas en su casa. <b>Para salir hay que sacar un 5</b> (si puedes sacar, es obligatorio).</li>
+      <li>Las fichas dan la vuelta al tablero y entran por el pasillo de su color hasta la meta del centro. Para entrar en la meta hay que sacar el número justo.</li>
+      <li><b>Con un 6 repites tirada.</b> Si ya no tienes fichas en casa, el 6 cuenta 7. ¡Tres seises seguidos y la última ficha que moviste vuelve a casa!</li>
+      <li><b>Comer:</b> si caes donde hay una ficha rival (fuera de los seguros ✦), te la comes: vuelve a su casa y tú cuentas 20 con la ficha que quieras.</li>
+      <li>Al meter una ficha en la meta cuentas 10.</li>
+      <li><b>Barrera:</b> dos fichas del mismo color en una casilla no dejan pasar a nadie.</li>
+      <li><b>Por parejas:</b> no te comes a tu compañero, y cuando metes tus 4 fichas mueves las suyas. Gana la pareja que meta las 8.</li>
+      <li>Gana quien meta primero sus 4 fichas en la meta.</li>
+    </ol>`,
+
+  bot(s, seat) {
+    if (s.phase === 'roll') return { type: 'roll' };
+    const ms = legalMoves(s, seat, s.steps, s.isBonus);
+    return { type: 'move', i: (ms.find((m) => m.capture) || ms[(Math.random() * ms.length) | 0]).i };
+  },
+
+  demo() {
+    const s = this.setup(2);
+    s.pieces[1][0] = 38; // ficha roja ya en juego (casilla 17)
+    s.pieces[0][3] = 68; // ficha amarilla en su pasillo
+    return {
+      state: s,
+      steps: [
+        { say: 'Para sacar una ficha de casa hay que sacar un 5.', seat: 0, a: { type: 'roll', die: 5 }, wait: 1200 },
+        { say: '¡Un 5! Ana saca su ficha 🚀', seat: 0, a: { type: 'move', i: 0 }, wait: 2600 },
+        { say: 'Leo avanza 2 casillas con su ficha roja…', seat: 1, a: { type: 'roll', die: 2 }, wait: 1000 },
+        { say: '…y se queda justo a 6 casillas de Ana.', seat: 1, a: { type: 'move', i: 0 } },
+        { say: 'Ana saca un 6. Con 6 se repite tirada.', seat: 0, a: { type: 'roll', die: 6 }, wait: 1000 },
+        { say: 'Si caes en una ficha rival fuera de los seguros ✦… ¡te la comes! 😋', seat: 0, a: { type: 'move', i: 0 }, wait: 3500 },
+        { say: 'Comer da 20 casillas de premio para la ficha que quieras.', seat: 0, a: { type: 'move', i: 0 }, wait: 2400 },
+        { say: 'Y como sacó un 6, vuelve a tirar: un 3 justo para meter la ficha del pasillo en la meta.', seat: 0, a: { type: 'roll', die: 3 }, wait: 1000 },
+        { say: '¡Meta! 🏠 Llegar a casa da 10 de premio. ¡Gana quien meta las 4!', seat: 0, a: { type: 'move', i: 3 }, wait: 3800 },
+      ],
+    };
+  },
+
+  async animate(f, el, ctx) {
+    const { fx } = ctx;
+    const pawnEl = (seat, i) => el.querySelector(`[data-flip="p${seat}-${i}"]`);
+    const col = (seat) => COLORS[ctx.state.colors[seat]];
+    if (f.kind === 'exit') {
+      const p = pawnEl(f.seat, f.i);
+      if (!p) return;
+      ctx.sound('launch');
+      await fx.wait(480);
+      const c = fx.center(p);
+      fx.burst(c.x, c.y, { colors: [col(f.seat).hex, '#fff'], count: 50, scale: 0.7 });
+      fx.dust(c.x, c.y + 6, 24, 'rgba(255,200,120,.9)');
+      ctx.sound('firework');
+    }
+    if (f.kind === 'capture') {
+      const cell = el.querySelector(`[data-ring="${f.ring}"]`);
+      const victimHome = pawnEl(f.victim.seat, f.victim.i);
+      if (!cell) return;
+      if (victimHome) victimHome.style.opacity = '0';
+      await fx.wait(420);
+      const c = fx.center(cell);
+      const vc = col(f.victim.seat);
+      ctx.sound('chomp');
+      await fx.chomp(c, col(f.seat).hex, `<button class="pawn" style="--c:${vc.hex};--cd:${vc.dark}">${pieceSVG(ctx.state.ficha, vc.hex) || PAWN_SVG}</button>`);
+      if (victimHome) {
+        victimHome.style.opacity = '';
+        const h = fx.center(victimHome);
+        fx.dust(h.x, h.y, 20, 'rgba(255,255,255,.9)');
+        victimHome.animate([{ transform: 'scale(0)' }, { transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 400 });
+      }
+    }
+    if (f.kind === 'meta') {
+      await fx.wait(450);
+      const m = el.querySelector('.meta');
+      if (!m) return;
+      const r = m.getBoundingClientRect();
+      ctx.sound('firework');
+      for (let k = 0; k < 4; k++) fx.firework(r.left + r.width / 2 + (k - 1.5) * 40, r.top - 40 - k * 20, { delay: k * 10, colors: [col(f.seat).hex, '#fff'] });
+      fx.sparkle(r.left + r.width / 2, r.top + r.height / 2, col(f.seat).light, 24, 1.5);
+    }
+    if (f.kind === 'sixes') { fx.flash('#fff'); fx.screenShake(12); ctx.sound('boom'); }
+    if (f.kind === 'win') { const r = el.getBoundingClientRect(); fx.fireworksShow(r, 10); ctx.sound('firework'); }
+  },
+
   setup(n, opts = {}) {
     const colors = n === 2 ? [0, 2] : [0, 1, 2, 3].slice(0, n);
     return {
       n, colors, pieces: colors.map(() => [-1, -1, -1, -1]),
       turn: 0, phase: 'roll', dieVal: null, steps: null, sixes: 0, again: false, bonus: [], isBonus: false,
-      last: null, v: 0, log: ['¡Saca un 5 para salir de casa!'], fx: null, teams: opts.teams || null,
+      last: null, v: 0, log: ['¡Saca un 5 para salir de casa!'], fx: null, teams: opts.teams || null, board: (opts.options && opts.options.board) || 'clasico', ficha: (opts.options && opts.options.ficha) || 'peon',
     };
   },
   turnOf: (s) => (s.over ? null : s.turn),
@@ -118,7 +205,7 @@ export default {
     if (seat !== s.turn) fail('No es tu turno');
     if (a.type === 'roll') {
       if (s.phase !== 'roll') fail('Ahora toca mover ficha');
-      const d = a.cheat && a.cheat >= 1 && a.cheat <= 6 && s.allowCheat ? a.cheat : die();
+      const d = s.demo && a.die ? a.die : die();
       s.dieVal = d;
       s.rollId = s.v;
       let steps = d;
@@ -129,8 +216,8 @@ export default {
           const l = s.last;
           if (l && l.by === seat && s.pieces[l.seat][l.i] >= 0 && s.pieces[l.seat][l.i] <= 63) {
             s.pieces[l.seat][l.i] = -1;
-            s.fx = { id: s.v, type: 'bad', seat, text: '¡Tres seises! Ficha a casa', emoji: '😱' };
-          } else s.fx = { id: s.v, type: 'bad', seat, text: '¡Tres seises! Pierdes el turno', emoji: '😱' };
+            s.fx = { id: s.v, type: 'bad', kind: 'sixes', seat, text: '¡Tres seises! Ficha a casa', emoji: '😱' };
+          } else s.fx = { id: s.v, type: 'bad', kind: 'sixes', seat, text: '¡Tres seises! Pierdes el turno', emoji: '😱' };
           pushLog(s, `{${seat}} saca tres seises`);
           nextTurn(s);
           return s;
@@ -161,18 +248,19 @@ export default {
       if (m.capture) {
         s.pieces[m.capture.seat][m.capture.i] = -1;
         s.bonus.push(20);
-        s.fx = { id: s.v, type: 'capture', seat, victim: m.capture.seat, text: '¡Te como! +20', emoji: '😋' };
+        const ring = ringOf(s.colors[m.capture.seat], st.pieces[m.capture.seat][m.capture.i]);
+        s.fx = { id: s.v, type: 'capture', kind: 'capture', seat: ow, i: m.i, victim: m.capture, ring, text: '¡Te como! +20', emoji: '😋', bannerDelay: 1500, noFlip: [`p${m.capture.seat}-${m.capture.i}`] };
         pushLog(s, `{${seat}} se come a {${m.capture.seat}} y cuenta 20`);
       } else if (from === -1) {
-        s.fx = { id: s.v, type: 'special', seat, text: '¡Ficha fuera!', emoji: '🚀' };
+        if (!m.capture) s.fx = { id: s.v, type: 'special', kind: 'exit', seat: ow, i: m.i, text: '¡Ficha fuera!', emoji: '🚀', bannerDelay: 500 };
       }
       if (m.to === META) {
         s.bonus.push(10);
-        s.fx = { id: s.v, type: 'special', seat, text: '¡A casa! +10', emoji: '🏠' };
+        s.fx = { id: s.v, type: 'special', kind: 'meta', seat: ow, i: m.i, text: '¡A casa! +10', emoji: '🏠', bannerDelay: 500 };
         pushLog(s, `{${seat}} mete una ficha en la meta`);
         if (teamDone(s, seat)) {
           s.over = true; s.winner = seat;
-          s.fx = { id: s.v, type: 'win', seat, text: '¡Ganador!', emoji: '🏆' };
+          s.fx = { id: s.v, type: 'win', kind: 'win', seat, text: '¡Ganador!', emoji: '🏆', bannerDelay: 500 };
           return s;
         }
       }
@@ -202,7 +290,7 @@ export default {
       const c = COLORS[s.colors[t.seat]];
       const can = t.seat === ctrl && movable.has(t.i);
       const justMoved = s.moved && s.moved.seat === t.seat && s.moved.i === t.i;
-      return `<button class="pawn ${small ? 'sm' : ''} ${can ? 'can' : ''} ${justMoved ? 'hop' : ''}" data-flip="p${t.seat}-${t.i}" ${can ? `data-move="${t.i}"` : 'tabindex="-1"'} style="--c:${c.hex};--cd:${c.dark}">${PAWN_SVG}</button>`;
+      return `<button class="pawn ${small ? 'sm' : ''} ${can ? 'can' : ''} ${justMoved ? 'hop' : ''}" data-flip="p${t.seat}-${t.i}" ${can ? `data-move="${t.i}"` : 'tabindex="-1"'} style="--c:${c.hex};--cd:${c.dark}">${pieceSVG(s.ficha, c.hex) || PAWN_SVG}</button>`;
     };
     RING.forEach(([r, c], idx) => {
       const exitOf = EXIT.indexOf(idx);
@@ -210,7 +298,9 @@ export default {
       let style = '';
       if (exitOf >= 0 && usedColors(s).has(exitOf)) style = `background:${COLORS[exitOf].light}`;
       const toks = posOf.get(`${r},${c}`) || [];
-      cells.push(`<div class="${cls.join(' ')}" style="grid-row:${r + 1};grid-column:${c + 1};${style}">${SAFE.has(idx) ? '<span class="star">✦</span>' : ''}${toks.map((t) => token(t, toks.length > 1)).join('')}</div>`);
+      const num = ((idx - 8 + 67) % 68) + 1; // numeración clásica: el amarillo sale por la 5
+      const vert = c >= 8 && c <= 10;
+      cells.push(`<div class="${cls.join(' ')} ${vert ? 'cv' : 'ch'}" data-ring="${idx}" style="grid-row:${r + 1};grid-column:${c + 1};${style}"><span class="cnum">${num}</span>${SAFE.has(idx) ? `<span class="rosette">${exitOf >= 0 ? '▲' : '✿'}</span>` : ''}${toks.map((t) => token(t, toks.length > 1)).join('')}</div>`);
     });
     LANE.forEach((lane, col) => lane.forEach(([r, c]) => {
       const toks = posOf.get(`${r},${c}`) || [];
@@ -246,7 +336,7 @@ export default {
 
     el.innerHTML = `
       <div class="status">${status}</div>
-      <div class="parchis-wrap"><div class="parchis">${cells.join('')}</div></div>
+      <div class="parchis-wrap theme-${s.board || 'clasico'}"><div class="parchis">${cells.join('')}</div>${THEME_DECOR[s.board] || ''}</div>
       <div class="dicebar">
         <button class="die3d ${s.rollId === s.v ? 'rolling' : ''}" data-roll ${myTurn && s.phase === 'roll' ? '' : 'disabled'} style="--c:${curColor.hex}">
           <span>${dieFace}</span>
@@ -260,12 +350,26 @@ export default {
 };
 
 const usedColors = (s) => new Set(s.colors);
+// decoración de cada tablero temático: cosas que caen y adornos en las esquinas
+const falling = (chars, n) => Array.from({ length: n }, (_, i) => `<span class="fall" style="left:${(i * 37 + 7) % 100}%;animation-delay:-${(i * 1.7) % 9}s;animation-duration:${7 + (i % 4) * 1.5}s;font-size:${14 + (i % 3) * 6}px">${chars[i % chars.length]}</span>`).join('');
+const corners = (a) => `<span class="cdeco c1">${a[0]}</span><span class="cdeco c2">${a[1]}</span><span class="cdeco c3">${a[2]}</span><span class="cdeco c4">${a[3]}</span>`;
+const THEME_DECOR = {
+  primavera: `<div class="decor">${falling(['🌸', '🌼', '🦋', '🌸'], 12)}${corners(['🌷', '🐝', '🌼', '🐞'])}</div>`,
+  verano: `<div class="decor">${falling(['🫧', '✨'], 8)}${corners(['🌴', '🐚', '⛱️', '🦀'])}<span class="sun">☀️</span></div>`,
+  otono: `<div class="decor">${falling(['🍂', '🍁', '🍂', '🍃'], 14)}${corners(['🍄', '🌰', '🦔', '🍁'])}</div>`,
+  invierno: `<div class="decor">${falling(['❄️', '❄', '❅', '❄️'], 16)}${corners(['⛄', '🌲', '🧣', '🌲'])}</div>`,
+};
 const DIE_FACES = [null, '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-const PAWN_SVG = `<svg viewBox="0 0 40 48"><defs><radialGradient id="pg" cx="35%" cy="30%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".9"/><stop offset=".35" stop-color="#fff" stop-opacity="0"/></radialGradient></defs>
-<ellipse cx="20" cy="44" rx="15" ry="4" fill="rgba(0,0,0,.25)"/>
-<path d="M20 4a8 8 0 0 1 5 14.2c3 1.6 4.5 4 4.5 6.3h-3c1.6 4.4 4.3 9.3 8 13.5v4H5.5v-4c3.7-4.2 6.4-9.1 8-13.5h-3c0-2.3 1.5-4.7 4.5-6.3A8 8 0 0 1 20 4z" fill="var(--c)" stroke="var(--cd)" stroke-width="2"/>
-<path d="M20 4a8 8 0 0 1 5 14.2c3 1.6 4.5 4 4.5 6.3h-3c1.6 4.4 4.3 9.3 8 13.5v4H5.5v-4c3.7-4.2 6.4-9.1 8-13.5h-3c0-2.3 1.5-4.7 4.5-6.3A8 8 0 0 1 20 4z" fill="url(#pg)"/>
-<circle cx="17" cy="9" r="2.2" fill="#fff" opacity=".85"/></svg>`;
+const PAWN_PATH = 'M20 4a8 8 0 0 1 5 14.2c3 1.6 4.5 4 4.5 6.3h-3c1.6 4.4 4.3 9.3 8 13.5v4H5.5v-4c3.7-4.2 6.4-9.1 8-13.5h-3c0-2.3 1.5-4.7 4.5-6.3A8 8 0 0 1 20 4z';
+export const PAWN_SVG = `<svg viewBox="0 0 40 50"><defs>
+<radialGradient id="pg" cx="35%" cy="25%" r="70%"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".3" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<linearGradient id="ps" x1="0" x2="1"><stop offset="0" stop-color="#000" stop-opacity=".35"/><stop offset=".35" stop-color="#000" stop-opacity="0"/><stop offset=".7" stop-color="#000" stop-opacity=".05"/><stop offset="1" stop-color="#000" stop-opacity=".45"/></linearGradient></defs>
+<ellipse cx="20" cy="45" rx="16" ry="4.5" fill="rgba(0,0,0,.3)"/>
+<path d="M5.5 42 h29 v3 q-14.5 4 -29 0 z" fill="var(--cd)"/>
+<path d="${PAWN_PATH}" fill="var(--c)" stroke="var(--cd)" stroke-width="1.6"/>
+<path d="${PAWN_PATH}" fill="url(#ps)"/><path d="${PAWN_PATH}" fill="url(#pg)"/>
+<ellipse cx="20" cy="24.5" rx="9.5" ry="1.6" fill="var(--cd)" opacity=".55"/>
+<circle cx="17" cy="9" r="2.4" fill="#fff" opacity=".9"/></svg>`;
 
 // ----- geometría del tablero (cuadrícula 19x19) -----
 const rot = ([r, c]) => [18 - c, r];

@@ -56,6 +56,12 @@ export default {
     pushLog(s, 'Empieza quien tiene el doble más alto');
     return s;
   },
+  hidden: true,
+  viewFor(s, seat) {
+    // cada jugador solo recibe sus fichas; las de los demás y el montón van boca abajo
+    if (s.roundOver) return s;
+    return { ...s, hands: s.hands.map((h, i) => (i === seat ? h : h.map(() => null))), boneyard: s.boneyard.map(() => null) };
+  },
   turnOf: (s) => (s.over || s.roundOver ? null : s.turn),
   isOver: (s) => !!s.over,
 
@@ -92,6 +98,7 @@ export default {
       hand.splice(a.i, 1);
       s.passes = 0;
       pushLog(s, `{${seat}} pone ${tile[0]}|${tile[1]}`);
+      s.fx = { id: s.v, type: 'place', seat };
       if (tile[0] === tile[1]) s.fx = { id: s.v, type: 'special', seat, text: `¡Doble ${tile[0]}!`, emoji: '✨' };
       if (!hand.length) { endRound(s, seat, false); return s; }
       s.turn = (s.turn + 1) % s.n;
@@ -119,6 +126,54 @@ export default {
       return s;
     }
     fail('Acción desconocida');
+  },
+
+  rules: `
+    <ol>
+      <li>Se reparten 7 fichas a cada jugador. Empieza quien tenga el doble más alto.</li>
+      <li>Por turnos, pon una ficha que coincida con uno de los dos extremos de la mesa.</li>
+      <li>Si no puedes poner, <b>roba</b> del montón hasta que puedas; si no quedan fichas, <b>pasas</b>.</li>
+      <li>Gana la ronda quien se quede sin fichas (¡Dominó!) y se lleva los puntos de las fichas de los demás.</li>
+      <li>Si nadie puede poner (juego cerrado), gana quien tenga menos puntos en la mano.</li>
+      <li><b>Por parejas</b> (4 jugadores): los compañeros se sientan enfrente y suman los puntos juntos.</li>
+      <li>Gana quien llegue antes a <b>100 puntos</b>.</li>
+    </ol>`,
+
+  bot(s, seat) {
+    if (s.roundOver) return { type: 'nextRound' };
+    const h = s.hands[seat];
+    for (let i = 0; i < h.length; i++) { const sd = sidesFor(s, h[i]); if (sd.length) return { type: 'play', i, side: sd[0] }; }
+    return { type: s.boneyard.length ? 'draw' : 'pass' };
+  },
+
+  demo() {
+    const s = this.setup(2);
+    s.hands = [[[6, 6], [3, 6], [1, 3], [2, 4]], [[5, 6], [5, 5], [0, 1]]];
+    s.boneyard = [[4, 4], [0, 2]];
+    s.turn = 0; s.starter = null;
+    return {
+      state: s,
+      steps: [
+        { say: 'Empieza quien tiene el doble más alto: Ana pone el 6|6.', seat: 0, a: { type: 'play', i: 0 } },
+        { say: 'Hay que poner una ficha que coincida con un extremo: Leo pone el 6|5.', seat: 1, a: { type: 'play', i: 0, side: 'R' } },
+        { say: 'Ana pone el 3|6 al otro lado.', seat: 0, a: { type: 'play', i: 0, side: 'L' } },
+        { say: 'Leo pone el doble 5 ✨', seat: 1, a: { type: 'play', i: 0, side: 'R' } },
+        { say: 'Ana encaja el 1|3 en el lado del 3.', seat: 0, a: { type: 'play', i: 0, side: 'L' } },
+        { say: 'Leo coloca su última ficha, el 0|1… ¡Dominó! Se lleva los puntos que le quedan a Ana.', seat: 1, a: { type: 'play', i: 0, side: 'L' }, wait: 3800 },
+      ],
+    };
+  },
+
+  animate(f, el, ctx) {
+    const { fx } = ctx;
+    const t = el.querySelector('.tile.drop-in');
+    if (t) { const c = fx.center(t); setTimeout(() => fx.dust(c.x, c.y + 10, 30, 'rgba(255,255,255,.7)'), 300); }
+    if (f.type === 'special' && t) { const c = fx.center(t); setTimeout(() => { fx.sparkle(c.x, c.y, '#ffe066', 22, 1.5); ctx.sound('special'); }, 350); }
+    if ((f.type === 'round' || f.type === 'win') && t) {
+      const c = fx.center(t);
+      setTimeout(() => { fx.screenShake(10); ctx.sound('boom'); fx.burst(c.x, c.y, { count: 60 }); }, 400);
+      if (f.type === 'win') fx.fireworksShow(el.getBoundingClientRect(), 8);
+    } else if (!f.type || f.type === 'place') ctx.sound('place');
   },
 
   render(el, s, ctx) {

@@ -9,7 +9,7 @@ import * as fx from './fx.js';
 import { esc, PLAYER_COLORS, TEAM_NAMES, TEAM_EMOJI, TEAM_COLORS, GameError } from './util.js';
 import { qrcode } from '../vendor/qrcode.mjs';
 
-const WEB_URL = 'https://espjulian84-cpu.github.io/JuegosConAmigos/';
+const DOWNLOAD_URL = 'https://github.com/espjulian84-cpu/JuegosConAmigos/releases/latest';
 const AVATARS = ['🦊', '🐼', '🐸', '🐯', '🐵', '🐰', '🦄', '🐙', '🐨', '🦁', '🐷', '🐮', '🐔', '🐧', '🐲', '🦖', '👽', '🤖', '🐶', '🐱', '🦉', '🐢', '🦋', '🐝'];
 const ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const randCode = (n) => Array.from({ length: n }, () => ABC[Math.floor(Math.random() * ABC.length)]).join('');
@@ -61,12 +61,9 @@ async function copy(text) {
     let ok = false; try { ok = document.execCommand('copy'); } catch {} ta.remove(); return ok;
   }
 }
-const isNative = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-const webBase = () => (isNative() || location.protocol === 'file:' ? WEB_URL : location.origin + location.pathname);
-const inviteUrl = (code) => `${webBase()}?sala=${code}`;
 function inviteText(code) {
   const g = S.room && getGame(S.room.sel);
-  return `🎲 ¡${me.name} te invita a jugar${g ? ' al ' + g.name : ''}! Abre la app Juegos con Amigos y entra con el código ${code}, o juega desde el navegador: ${inviteUrl(code)}`;
+  return `🎲 ¡${me.name} te invita a jugar${g ? ' al ' + g.name : ''}! Abre Juegos con Amigos, pulsa "Unirme" y escribe el código ${code}. ¿No tienes la app? Descárgala aquí: ${DOWNLOAD_URL}`;
 }
 let wakeLock = null;
 async function keepAwake(on) {
@@ -87,7 +84,7 @@ async function createRoom() {
     try {
       S.host = await net.hostRoom(code, { onConn: () => {}, onMsg: hostMsg, onClose: hostClose, onError: (e) => console.warn(e) });
       S.mode = 'host';
-      S.room = { code, hostPid: me.pid, players: [{ ...me, online: true }], sel: GAMES[0].id, teamMode: false, teams: {}, gameId: null, seats: null, state: null, gameNo: 0 };
+      S.room = { code, hostPid: me.pid, players: [{ ...me, online: true }], sel: GAMES[0].id, teamMode: false, teams: {}, opts: {}, gameId: null, seats: null, state: null, gameNo: 0 };
       S.screen = 'lobby'; keepAwake(true); render();
       return;
     } catch (e) {
@@ -139,13 +136,48 @@ function hostClose(connId) {
 }
 
 function broadcastRoom() {
-  if (S.mode === 'host') S.host.broadcast({ t: 'room', room: S.room });
+  const r = S.room;
+  if (S.mode === 'host') {
+    const g = r.gameId && getGame(r.gameId);
+    if (g && g.viewFor && r.state) {
+      // cada jugador recibe solo lo que puede ver (sus fichas, sus barcos…)
+      const cache = new Map();
+      for (const [cid, pid] of S.connPid) {
+        const seat = r.seats.indexOf(pid);
+        if (!cache.has(seat)) cache.set(seat, { ...r, state: g.viewFor(r.state, seat) });
+        S.host.send(cid, { t: 'room', room: cache.get(seat) });
+      }
+    } else S.host.broadcast({ t: 'room', room: r });
+  }
+  scheduleTimer();
   onRoomUpdated();
+}
+
+// Temporizadores del juego (tiempo por turno, esconder cartas…): solo los ejecuta quien manda.
+let timerHandle = null, timerId = null;
+function scheduleTimer() {
+  const s = S.room && S.room.state;
+  const t = s && s.timer;
+  if (!t || S.mode === 'client') return;
+  if (t.id === timerId) return;
+  timerId = t.id;
+  clearTimeout(timerHandle);
+  timerHandle = setTimeout(() => {
+    const cur = S.room && S.room.state;
+    if (cur && cur.timer && cur.timer.id === t.id) doAction('sys', t.action);
+  }, t.ms);
+}
+const timerSeen = new Map();
+function timeLeft() {
+  const t = S.room && S.room.state && S.room.state.timer;
+  if (!t) return null;
+  if (!timerSeen.has(t.id)) timerSeen.set(t.id, Date.now());
+  return Math.max(0, t.ms - (Date.now() - timerSeen.get(t.id)));
 }
 
 function doAction(seat, action) {
   const r = S.room;
-  if (seat == null || seat < 0) return 'Estás mirando la partida';
+  if (seat !== 'sys' && (seat == null || seat < 0)) return 'Estás mirando la partida';
   const g = getGame(r.gameId);
   try {
     r.state = g.action(r.state, seat, action || {});
@@ -197,16 +229,22 @@ function startGame() {
   r.teamsArr = teams;
   r.gameId = g.id;
   r.gameNo = (r.gameNo || 0) + 1;
-  r.state = g.setup(order.length, { teams });
+  r.state = g.setup(order.length, { teams, options: gameOptions(r, g) });
   r.players.forEach(upsertFriend);
   broadcastRoom();
+}
+
+function gameOptions(r, g) {
+  const o = {};
+  (g.options || []).forEach((op) => { o[op.id] = (r.opts && r.opts[g.id] && op.id in r.opts[g.id]) ? r.opts[g.id][op.id] : op.def; });
+  return o;
 }
 
 function rematch() {
   const r = S.room;
   const g = getGame(r.gameId);
   r.gameNo++;
-  r.state = g.setup(r.seats.length, { teams: r.teamsArr });
+  r.state = g.setup(r.seats.length, { teams: r.teamsArr, options: gameOptions(r, g) });
   broadcastRoom();
 }
 function backToLobby() {
@@ -261,8 +299,12 @@ async function reconnect() {
 function leave(silent) {
   if (S.mode === 'host') { try { S.host.broadcast({ t: 'bye' }); } catch {} setTimeout(() => S.host && S.host.close(), 300); }
   if (S.mode === 'client' && S.conn) S.conn.close();
+  if (S.demo) { clearTimeout(S.demo.timer); S.demo = null; }
+  clearTimeout(timerHandle); timerId = null;
+  const wasDemo = S.mode === 'demo';
   S.mode = null; S.room = null; S.host = null; S.conn = null; S.reconnecting = false;
   S.connPid.clear(); S.screen = 'home'; S.modal = null;
+  if (wasDemo) S.tab = 'games';
   keepAwake(false);
   render();
 }
@@ -292,7 +334,7 @@ function startLocal() {
   if (!checkName()) return;
   S.mode = 'local';
   S.room = {
-    code: null, hostPid: me.pid, sel: GAMES[0].id, teamMode: false, teams: {}, gameId: null, seats: null, state: null, gameNo: 0,
+    code: null, hostPid: me.pid, sel: GAMES[0].id, teamMode: false, teams: {}, opts: {}, gameId: null, seats: null, state: null, gameNo: 0,
     players: [{ ...me, online: true }, { pid: 'L2', name: 'Jugador 2', avatar: AVATARS[1], online: true }],
   };
   S.screen = 'lobby'; render();
@@ -305,7 +347,7 @@ function onRoomUpdated() {
   const r = S.room;
   if (!r) return;
   if (r.gameId && r.state) {
-    if (S.screen !== 'game' || S.gameNo !== r.gameNo) { S.screen = 'game'; S.ui = {}; S.gameNo = r.gameNo; S.lastFx = null; S.lastV = null; S.wasMine = false; }
+    if (S.screen !== 'game' || S.gameNo !== r.gameNo) { S.screen = 'game'; S.ui = {}; S.gameNo = r.gameNo; S.curtainSeat = null; S.lastFx = null; S.lastV = null; S.wasMine = false; }
     playEffects();
   } else if (S.screen === 'game' || S.screen === 'connecting') S.screen = 'lobby';
   render();
@@ -314,7 +356,7 @@ function onRoomUpdated() {
 function mySeat() {
   const r = S.room;
   if (!r || !r.seats) return null;
-  if (S.mode === 'local') { const t = getGame(r.gameId).turnOf(r.state); return t == null ? (r.state.winner ?? 0) : t; }
+  if (S.mode === 'local' || S.mode === 'demo') { const t = getGame(r.gameId).turnOf(r.state); return t == null ? (r.state.winner ?? 0) : t; }
   const i = r.seats.indexOf(me.pid);
   return i < 0 ? null : i;
 }
@@ -327,24 +369,36 @@ function playEffects() {
   if (first) return;
   const rolled = s.rollId === s.v;
   if (rolled) sound.play('dice');
-  const f = s.fx;
-  if (f && S.lastFx !== f.id) {
+  const f = s.fx && S.lastFx !== s.fx.id ? s.fx : null;
+  if (f) {
     S.lastFx = f.id;
-    const delay = rolled ? 650 : 150;
-    setTimeout(() => {
+    // animación propia del juego (se lanza cuando el tablero nuevo ya está dibujado)
+    if (g.animate) S.pendingFx = { f, delay: rolled ? 650 : 0 };
+    if (f.text) {
       const kind = f.type === 'win' ? 'win' : f.type === 'capture' ? 'capture' : f.type === 'bad' ? 'bad' : 'special';
-      sound.play(kind === 'win' ? 'win' : kind);
-      fx.banner(f.text, f.emoji || (kind === 'win' ? '🏆' : '✨'), kind);
-      if (kind === 'win') { fx.confetti(220); vibrate([100, 60, 100, 60, 300]); }
-      else if (kind === 'capture') { fx.confetti(60); vibrate(120); }
-      else if (kind === 'special') vibrate(40);
-    }, delay);
-  } else if (!rolled) sound.play(g.id === 'muros' ? 'place' : 'move');
-  if (S.mode !== 'local') {
+      setTimeout(() => {
+        if (!g.animate || f.type === 'win') sound.play(kind === 'win' ? 'win' : kind);
+        fx.banner(f.text, f.emoji || (kind === 'win' ? '🏆' : '✨'), kind);
+        if (kind === 'win') { fx.confetti(220); fx.fireworksShow(null, 7); vibrate([100, 60, 100, 60, 300]); }
+        else vibrate(kind === 'capture' ? 140 : 40);
+      }, (rolled ? 650 : 120) + (f.bannerDelay || 0));
+    }
+  }
+  if (!rolled && (!f || (!f.text && !g.animate))) sound.play(g.moveSound || 'move');
+  if (S.mode !== 'local' && S.mode !== 'demo') {
     const mine = g.turnOf(s) === mySeat() && mySeat() != null;
     if (mine && !S.wasMine) setTimeout(() => { sound.play('turn'); vibrate(60); }, rolled ? 900 : 300);
     S.wasMine = mine;
   }
+}
+
+function runPendingFx(board) {
+  const p = S.pendingFx;
+  if (!p) return;
+  S.pendingFx = null;
+  const g = getGame(S.room.gameId);
+  const go = () => { try { g.animate(p.f, board, { ...makeCtx(), state: S.room.state }); } catch (e) { console.error(e); } };
+  if (p.delay) setTimeout(go, p.delay); else requestAnimationFrame(go);
 }
 
 // ======================================================================
@@ -397,7 +451,7 @@ function homeHTML() {
     const pending = params.get('sala');
     body = `
       <div class="hero">
-        <div class="logo"><span>🎲</span><span>🪿</span><span>${getGame('domino').icon}</span><span>🧱</span></div>
+        <div class="logo"><span>🎲</span><span>${getGame('oca').icon}</span><span>${getGame('domino').icon}</span><span>🧱</span></div>
         <h1>Juegos con Amigos</h1>
         <p>Hasta 6 jugadores, cada uno en su móvil</p>
       </div>
@@ -411,7 +465,8 @@ function homeHTML() {
         <button class="btn big c3" data-a="local">📱 Jugar todos en este móvil</button>
       </div>
       <div class="gamesmini">${GAMES.map((g) => `<div class="gmini" style="--gc:${g.color}"><span>${g.icon}</span>${g.name}</div>`).join('')}</div>
-      <p class="foot">Los móviles se conectan por internet (wifi o datos). Tu código de amigo: <b>${me.pid}</b></p>`;
+      <p class="foot">Los móviles se conectan sin cables (wifi o datos). Tu código de amigo: <b>${me.pid}</b></p>
+      <button class="btn ghost" data-a="shareapp">📲 Pasar la app a un amigo</button>`;
   } else if (S.tab === 'games') {
     body = `
       <h2 class="sect">🎮 Juegos disponibles</h2>
@@ -419,7 +474,8 @@ function homeHTML() {
         <div class="gamecard" style="--gc:${g.color}">
           <div class="gicon">${g.icon}</div>
           <div class="grow"><h3>${g.name}</h3><p>${g.blurb}</p>
-          <div class="tags"><span>👤 ${g.minPlayers}-${g.maxPlayers}</span>${g.teams ? '<span>🤝 Equipos</span>' : ''}</div></div>
+          <div class="tags"><span>👤 ${g.minPlayers}-${g.maxPlayers}</span>${g.teams ? '<span>🤝 Equipos</span>' : ''}${g.realtime ? '<span>⚡ Tiempo real</span>' : ''}</div>
+          <div class="row wrap gbtns"><button class="btn small" data-rules="${g.id}">📖 Cómo se juega</button>${g.demo ? `<button class="btn small c1" data-demo="${g.id}">▶ Ejemplo</button>` : ''}</div></div>
         </div>`).join('')}</div>
       <h2 class="sect">⭐ Mi lista de juegos por añadir</h2>
       <p class="hint">Apunta aquí los juegos de mesa que te encuentres y te gusten para añadirlos a la app más adelante.</p>
@@ -483,7 +539,7 @@ function lobbyHTML() {
           <button class="btn c3" data-a="invitefriends">👥 Invitar amigos</button>
         </div>
       </div>
-      <div class="qr" title="Escanea para jugar desde el navegador">${qrSVG(inviteUrl(r.code))}</div>
+      <div class="qr" title="Escanea para descargar la app">${qrSVG(DOWNLOAD_URL)}<small>Descargar app</small></div>
     </div>`;
 
   const picker = isHost ? `
@@ -491,13 +547,21 @@ function lobbyHTML() {
     <div class="gamepick">${GAMES.map((x) => `
       <button class="gp ${x.id === r.sel ? 'on' : ''}" data-sel="${x.id}" style="--gc:${x.color}">
         <span class="gpi">${x.icon}</span><b>${x.name}</b><small>${x.minPlayers}-${x.maxPlayers} jug.</small></button>`).join('')}</div>
+    <div class="optrow"><button class="btn small" data-rules="${g.id}">📖 Cómo se juega</button></div>
+    ${(g.options || []).map((op) => {
+      const cur = gameOptions(r, g)[op.id];
+      if (op.type === 'bool') return `<div class="teamrow"><label class="switch" data-opt="${g.id}|${op.id}|0"><input type="checkbox" ${cur ? 'checked' : ''} disabled><span></span> ${op.label}</label></div>`;
+      return `<div class="optchoice"><div class="optlabel">${op.label}</div><div class="chips">${op.choices.map((c, ci) => `<button class="chip ${c.v === cur ? 'on' : ''}" data-opt="${g.id}|${op.id}|${ci}">${c.label}</button>`).join('')}</div></div>`;
+    }).join('')}
     ${g.teams ? `<div class="teamrow">
       <label class="switch"><input type="checkbox" data-a="teammode" ${r.teamMode ? 'checked' : ''}><span></span> 🤝 Por equipos${g.teams === 'pairs4' ? ' (parejas)' : ''}</label>
       ${r.teamMode ? '<button class="btn small" data-a="shuffleteams">🔀 Al azar</button>' : ''}
     </div>` : ''}
     ${local && r.players.length < MAX_PLAYERS ? '<button class="btn ghost" data-a="addlocal">➕ Añadir jugador</button>' : ''}
     <button class="btn big startbtn ${err ? 'disabled' : 'pulse'}" data-a="start">${err ? '⏳ ' + esc(err) : `▶ ¡Empezar ${g.name}!`}</button>`
-    : `<div class="card waiting"><div class="gpi big">${g.icon}</div><div>Juego elegido: <b>${g.name}</b>${r.teamMode ? ' · 🤝 por equipos' : ''}</div><div class="dots">Esperando a que el anfitrión empiece<span>.</span><span>.</span><span>.</span></div></div>`;
+    : `<div class="card waiting"><div class="gpi big">${g.icon}</div><div>Juego elegido: <b>${g.name}</b>${r.teamMode ? ' · 🤝 por equipos' : ''}</div>
+      <div class="hint">${(g.options || []).map((op) => { const v = gameOptions(r, g)[op.id]; return op.type === 'bool' ? `${op.label}: ${v ? 'sí' : 'no'}` : `${op.label}: ${op.choices.find((c) => c.v === v)?.label}`; }).join(' · ')}</div>
+      <button class="btn small" data-rules="${g.id}">📖 Cómo se juega</button><div class="dots">Esperando a que el anfitrión empiece<span>.</span><span>.</span><span>.</span></div></div>`;
 
   return `
     <header class="topbar"><button class="iconbtn" data-a="leave">←</button><div class="grow title">${local ? '📱 En este móvil' : '🏠 Sala de espera'}</div><button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button></header>
@@ -535,9 +599,14 @@ function makeCtx() {
       return `<b>${esc(names[w])}</b>`;
     },
     toast,
+    sound: (n) => sound.play(n),
+    fx,
+    state: s,
+    timeLeft,
     rerender: () => renderGame(fx.snapshot(document.getElementById('board'))),
     send: (action) => {
       sound.play('click');
+      if (S.mode === 'demo') return;
       if (S.mode === 'client') { S.conn && S.conn.send({ t: 'act', action }); return; }
       const err = doAction(S.mode === 'local' ? mySeat() : r.seats.indexOf(me.pid), action);
       if (err) { toast(err); fx.shake(document.getElementById('board')); }
@@ -547,26 +616,87 @@ function makeCtx() {
 
 function renderGame(before) {
   const r = S.room, g = getGame(r.gameId), s = r.state;
-  const isHost = S.mode !== 'client';
+  const isHost = S.mode === 'host' || S.mode === 'local';
   const offline = r.players.filter((p) => !p.online && r.seats.includes(p.pid));
+  const ctx = makeCtx();
+  const turn = g.turnOf(s);
+  // Juegos con información oculta en un solo móvil: cortina para pasar el móvil sin ver lo del otro
+  const curtain = S.mode === 'local' && g.hidden && turn != null && S.curtainSeat !== turn;
+  const demo = S.mode === 'demo';
   app.innerHTML = `
     <header class="topbar" style="--gc:${g.color}">
       <button class="iconbtn" data-a="leave">✕</button>
-      <div class="grow title">${g.icon} ${g.name}</div>
+      <div class="grow title">${g.icon} ${demo ? 'Ejemplo: ' : ''}${g.name}</div>
       ${r.code ? `<span class="codepill">${r.code}</span>` : ''}
+      ${demo ? '' : `<button class="iconbtn" data-rules="${g.id}">❓</button>`}
       <button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button>
     </header>
     ${S.reconnecting ? '<div class="reconnect">📡 Reconectando…</div>' : ''}
     ${offline.length ? `<div class="reconnect warn">😴 Sin conexión: ${offline.map((p) => esc(p.name)).join(', ')}</div>` : ''}
-    ${S.mode === 'local' && g.turnOf(s) != null ? `<div class="localturn">${makeCtx().avatar(g.turnOf(s))} Pasa el móvil a <b>${esc(makeCtx().players[g.turnOf(s)])}</b></div>` : ''}
-    <main id="board" class="board-${g.id}"></main>
-    ${g.isOver(s) ? `<div class="endbar">${isHost
+    ${demo ? `<div class="democap"><span class="dstep">${S.demo.i}/${S.demo.steps.length}</span> ${esc(S.demo.say || '')}</div>` : ''}
+    ${S.mode === 'local' && turn != null && !curtain ? `<div class="localturn">${ctx.avatar(turn)} Turno de <b>${esc(ctx.players[turn])}</b></div>` : ''}
+    ${curtain ? `<div class="curtain"><div class="bigemoji">${ctx.avatar(turn)}</div><h2>Pasa el móvil a<br><b>${esc(ctx.players[turn])}</b></h2><p>Los demás, ¡no miréis! 🙈</p><button class="btn big c1" data-a="uncurtain">👀 Soy ${esc(ctx.players[turn])}, ver mi turno</button></div>` : `<main id="board" class="board-${g.id}"></main>`}
+    ${demo && S.demo.done ? '<div class="endbar"><button class="btn big c1" data-a="demoagain">🔁 Ver otra vez</button><button class="btn big" data-a="leave">✅ ¡Entendido!</button></div>' : ''}
+    ${!demo && g.isOver(s) ? `<div class="endbar">${isHost
       ? '<button class="btn big c1" data-a="rematch">🔁 Revancha</button><button class="btn big" data-a="lobby">🏠 Cambiar de juego</button>'
       : '<div class="hint">Esperando al anfitrión para la revancha…</div>'}</div>` : ''}`;
   const board = document.getElementById('board');
-  g.render(board, s, makeCtx());
-  fx.animateFrom(board, before);
+  if (board) {
+    g.render(board, s, ctx);
+    const skip = (S.pendingFx && S.pendingFx.f.noFlip) || [];
+    fx.animateFrom(board, before, skip);
+    runPendingFx(board);
+  } else S.pendingFx = null;
   bind();
+}
+
+// barras de tiempo ([data-timer]) que dibujan los juegos
+setInterval(() => {
+  const els = document.querySelectorAll('[data-timer]');
+  if (!els.length) return;
+  const t = S.room && S.room.state && S.room.state.timer;
+  const left = timeLeft();
+  els.forEach((el) => {
+    if (!t || left == null) { el.style.setProperty('--p', 0); el.dataset.secs = ''; return; }
+    el.style.setProperty('--p', left / t.ms);
+    el.dataset.secs = Math.ceil(left / 1000);
+    el.classList.toggle('hurry', left < 4000);
+  });
+}, 150);
+
+// ======================================================================
+//  PARTIDA DE EJEMPLO (instrucciones animadas)
+// ======================================================================
+const DEMO_NAMES = [['Ana', '🦊'], ['Leo', '🐼'], ['Sara', '🐸'], ['Hugo', '🐯'], ['Lola', '🦄'], ['Max', '🐙']];
+function startDemo(gameId) {
+  const g = getGame(gameId);
+  const d = g.demo();
+  d.state.demo = true;
+  const n = d.state.n;
+  S.mode = 'demo';
+  S.room = {
+    code: null, hostPid: 'D0', sel: g.id, gameId: g.id, gameNo: (S.room && S.room.gameNo || 0) + 1, state: d.state,
+    players: DEMO_NAMES.slice(0, n).map(([name, avatar], i) => ({ pid: 'D' + i, name, avatar, online: true })),
+    seats: DEMO_NAMES.slice(0, n).map((_, i) => 'D' + i), teamMode: false, teams: {}, opts: {},
+  };
+  S.demo = { steps: d.steps, i: 0, say: '¡Mira cómo se juega!', done: false, timer: null };
+  S.modal = null;
+  onRoomUpdated();
+  S.demo.timer = setTimeout(demoNext, 1600);
+}
+function demoNext() {
+  if (S.mode !== 'demo') return;
+  const st = S.demo.steps[S.demo.i];
+  if (!st) { S.demo.done = true; S.demo.say = '¡Ya sabes jugar! 🎉'; fx.confetti(120); sound.play('win'); render(); return; }
+  S.demo.i++;
+  S.demo.say = st.say;
+  render();
+  S.demo.timer = setTimeout(() => {
+    if (S.mode !== 'demo') return;
+    if (st.patch) { st.patch(S.room.state); S.room.state.v++; }
+    if (st.a) { const err = doAction(st.seat, st.a); if (err) console.warn('demo', err); } else onRoomUpdated();
+    S.demo.timer = setTimeout(demoNext, st.wait || 2300);
+  }, st.a || st.patch ? 1300 : 600);
 }
 
 function renderModal() {
@@ -600,6 +730,13 @@ function renderModal() {
       <p>${g ? `${g.icon} ${g.name} · ` : ''}Sala <b>${esc(inv.code)}</b></p>
       <div class="row"><button class="btn big c1" data-acc>🎉 ¡Vamos!</button><button class="btn" data-close>Ahora no</button></div></div>`;
     d.querySelector('[data-acc]').onclick = () => { S.modal = null; if (S.mode) leave(true); S.tab = 'play'; joinRoom(inv.code); };
+  } else if (m.type === 'rules') {
+    const g = getGame(m.gameId);
+    d.innerHTML = `<div class="sheet rules"><div class="rulehead" style="--gc:${g.color}"><span class="gicon">${g.icon}</span><h3>Cómo se juega: ${g.name}</h3></div>
+      <div class="ruletext">${g.rules || ''}</div>
+      ${g.demo && !S.mode ? `<button class="btn big c1" data-demo="${g.id}">▶ Ver partida de ejemplo</button>` : ''}
+      <button class="btn" data-close>Cerrar</button></div>`;
+    d.querySelectorAll('[data-demo]').forEach((b) => b.onclick = () => { sound.play('click'); startDemo(b.dataset.demo); });
   } else if (m.type === 'confirmleave') {
     d.innerHTML = `<div class="sheet"><h3>¿Salir de la ${S.mode === 'local' ? 'partida' : 'sala'}?</h3>${S.mode === 'host' ? '<p class="hint">Eres el anfitrión: la sala se cerrará para todos.</p>' : ''}
       <div class="row"><button class="btn c1" data-yes>Salir</button><button class="btn" data-close>Seguir jugando</button></div></div>`;
@@ -627,7 +764,9 @@ function bind() {
       case 'join': joinRoom(app.querySelector('#code').value); break;
       case 'local': startLocal(); break;
       case 'avatar': S.modal = { type: 'avatar' }; renderModal(); break;
-      case 'leave': if (S.screen === 'connecting') leave(true); else { S.modal = { type: 'confirmleave' }; renderModal(); } break;
+      case 'uncurtain': S.curtainSeat = getGame(r.gameId).turnOf(r.state); render(); break;
+      case 'demoagain': { const id = r.gameId; clearTimeout(S.demo.timer); startDemo(id); break; }
+      case 'leave': if (S.screen === 'connecting' || S.mode === 'demo') leave(true); else { S.modal = { type: 'confirmleave' }; renderModal(); } break;
       case 'mute': sound.toggleMute(); el.textContent = sound.isMuted() ? '🔇' : '🔊'; break;
       case 'start': startGame(); break;
       case 'rematch': rematch(); break;
@@ -636,6 +775,11 @@ function bind() {
         const text = inviteText(r.code);
         if (navigator.share) { try { await navigator.share({ title: 'Juegos con Amigos', text }); return; } catch {} }
         if (await copy(text)) toast('📋 Invitación copiada, pégala donde quieras');
+      })(); break;
+      case 'shareapp': (async () => {
+        const text = `🎲 ¡Descárgate Juegos con Amigos y jugamos juntos! ${DOWNLOAD_URL}`;
+        if (navigator.share) { try { await navigator.share({ title: 'Juegos con Amigos', text }); return; } catch {} }
+        window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
       })(); break;
       case 'invitefriends': S.modal = { type: 'invitefriends' }; renderModal(); break;
       case 'shuffleteams': {
@@ -667,6 +811,15 @@ function bind() {
   });
   const tm = app.querySelector('[data-a="teammode"]');
   if (tm) tm.onchange = () => { S.room.teamMode = tm.checked; if (tm.checked && !Object.keys(S.room.teams).length) S.room.players.forEach((p, i) => { S.room.teams[p.pid] = i % 2; }); broadcastRoom(); };
+  on('[data-rules]', (el) => { S.modal = { type: 'rules', gameId: el.dataset.rules }; sound.play('click'); renderModal(); });
+  on('[data-demo]', (el) => { sound.play('click'); startDemo(el.dataset.demo); });
+  on('[data-opt]', (el) => {
+    const r = S.room; const [gid, oid, val] = el.dataset.opt.split('|');
+    const op = getGame(gid).options.find((o) => o.id === oid);
+    r.opts[gid] = r.opts[gid] || {};
+    r.opts[gid][oid] = op.type === 'bool' ? !(gameOptions(r, getGame(gid))[oid]) : op.choices[+val].v;
+    sound.play('click'); broadcastRoom();
+  });
   on('[data-sel]', (el) => { S.room.sel = el.dataset.sel; sound.play('click'); broadcastRoom(); });
   on('[data-team]', (el) => { const r = S.room; const pid = el.dataset.team; r.teams[pid] = ((r.teams[pid] ?? 0) + 1) % (r.players.length >= 6 ? 3 : 2); sound.play('click'); broadcastRoom(); });
   on('[data-delwish]', (el) => { wishlist.splice(+el.dataset.delwish, 1); LS.set('wishlist', wishlist); render(); });
