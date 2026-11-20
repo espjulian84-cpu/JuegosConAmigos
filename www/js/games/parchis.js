@@ -1,4 +1,4 @@
-import { clone, die, esc, fail, pushLog, sameTeam, TEAM_EMOJI, TEAM_COLORS } from '../util.js';
+import { clone, die, esc, fail, pushLog, sameTeam, TEAM_EMOJI, TEAM_COLORS, diceCubeHTML, firstRollSetup, firstRollStep } from '../util.js';
 import { pieceSVG, PIECE_CHOICES } from './pieces.js';
 
 // Tablero de 68 casillas. Cada color tiene: salida, entrada al pasillo (7 casillas) y meta.
@@ -123,6 +123,7 @@ export default {
 
   demo() {
     const s = this.setup(2);
+    s.first = null;
     s.pieces[1][0] = 38; // ficha roja ya en juego (casilla 17)
     s.pieces[0][3] = 68; // ficha amarilla en su pasillo
     return {
@@ -190,7 +191,7 @@ export default {
     return {
       n, colors, pieces: colors.map(() => [-1, -1, -1, -1]),
       turn: 0, phase: 'roll', dieVal: null, steps: null, sixes: 0, again: false, bonus: [], isBonus: false,
-      last: null, v: 0, log: ['¡Saca un 5 para salir de casa!'], fx: null, teams: opts.teams || null, board: (opts.options && opts.options.board) || 'clasico', ficha: (opts.options && opts.options.ficha) || 'peon',
+      last: null, v: 0, log: ['🎲 Tirada inicial: empieza quien saque más'], first: firstRollSetup(n), fx: null, teams: opts.teams || null, board: (opts.options && opts.options.board) || 'clasico', ficha: (opts.options && opts.options.ficha) || 'peon',
     };
   },
   turnOf: (s) => (s.over ? null : s.turn),
@@ -208,6 +209,11 @@ export default {
       const d = s.demo && a.die ? a.die : die();
       s.dieVal = d;
       s.rollId = s.v;
+      if (s.first) {
+        const w = firstRollStep(s, seat, d);
+        if (w != null) { pushLog(s, `{${w}} empieza la partida`); s.fx = { id: s.v, type: 'special', text: `¡Empieza {${w}} con un ${s.firstWinner.d}!`, emoji: '🎲' }; }
+        return s;
+      }
       let steps = d;
       if (d === 6) {
         s.sixes++;
@@ -330,18 +336,18 @@ export default {
     const curColor = COLORS[s.colors[s.turn]];
     let status;
     if (s.over) status = `🏆 ¡Gana ${ctx.winnerName(s.winner)}!`;
+    else if (s.first) status = myTurn ? '🎲 ¡Tirada inicial! Tira: el número más alto empieza' : `🎲 Tirada inicial: tira <b>${esc(ctx.players[s.turn])}</b>`;
     else if (myTurn && s.phase === 'roll') status = '👉 ¡Te toca! Tira el dado';
     else if (myTurn) status = s.isBonus ? `🎁 ¡Cuenta ${s.steps}! Elige ficha` : `Mueve ${s.steps} — toca una ficha que brille`;
     else status = `Turno de <b style="color:${curColor.dark}">${esc(ctx.players[s.turn])}</b>`;
 
     el.innerHTML = `
       <div class="status">${status}</div>
+      ${s.first ? firstRollsHTML(s, ctx) : ''}
       <div class="pzoom ${zoomed() ? 'zoom' : ''}"><div class="parchis-wrap theme-${s.board || 'clasico'}"><div class="parchis">${cells.join('')}</div>${THEME_DECOR[s.board] || ''}</div></div>
       <div class="ocazoom"><button class="btn small" data-zoom>${zoomed() ? '🔎 Ver tablero entero' : '🔍 Ampliar tablero'}</button></div>
       <div class="dicebar">
-        <button class="die3d ${s.rollId === s.v ? 'rolling' : ''}" data-roll ${myTurn && s.phase === 'roll' ? '' : 'disabled'} style="--c:${curColor.hex}">
-          <span>${dieFace}</span>
-        </button>
+        <button class="die3d" data-roll ${myTurn && s.phase === 'roll' ? '' : 'disabled'} style="--c:${curColor.hex}">${diceCubeHTML(s.dieVal || 5)}</button>
         <div class="log">${(s.log || []).slice(0, 3).map((l) => `<div>${ctx.fmt(l)}</div>`).join('')}</div>
       </div>
     `;
@@ -366,6 +372,10 @@ export default {
 };
 
 const usedColors = (s) => new Set(s.colors);
+export function firstRollsHTML(s, ctx) {
+  const f = s.first;
+  return `<div class="firstrolls">${[...Array(s.n).keys()].map((k) => `<div class="fr ${k === s.turn ? 'now' : ''} ${f.contenders.includes(k) ? '' : 'out'}"><span>${ctx.avatar(k)}</span><b>${esc(ctx.players[k])}</b><i>${f.rolls[k] != null ? ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'][f.rolls[k]] : f.contenders.includes(k) ? '⏳' : '—'}</i></div>`).join('')}</div>`;
+}
 const zoomed = () => { try { return localStorage.getItem('jca.parZoom') === '1'; } catch { return false; } };
 // decoración de cada tablero temático: cosas que caen y adornos en las esquinas
 const falling = (chars, n) => Array.from({ length: n }, (_, i) => `<span class="fall" style="left:${(i * 37 + 7) % 100}%;animation-delay:-${(i * 1.7) % 9}s;animation-duration:${7 + (i % 4) * 1.5}s;font-size:${14 + (i % 3) * 6}px">${chars[i % chars.length]}</span>`).join('');

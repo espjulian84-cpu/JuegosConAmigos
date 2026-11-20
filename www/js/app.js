@@ -435,8 +435,8 @@ function showStartDraw() {
   const r = S.room;
   if (!r || !r.state) return;
   const g = getGame(r.gameId);
-  const first = g.realtime ? null : g.turnOf(r.state);
-  if (first == null) return;
+  const first = g.realtime || r.state.first ? null : g.turnOf(r.state);
+  if (first == null) return; // juegos con tirada inicial de dado o en tiempo real: sin ruleta
   const ps = r.seats.map((pid) => r.players.find((p) => p.pid === pid) || { name: '?', avatar: '❔' });
   const d = document.createElement('div');
   d.className = 'drawov';
@@ -501,26 +501,31 @@ function playEffects() {
   S.lastV = s.v;
   if (first) return;
   const rolled = s.rollId === s.v;
-  if (rolled) sound.play('dice');
+  if (rolled) {
+    sound.play('dice');
+    // dado 3D: sale del botón y rueda por encima del tablero
+    requestAnimationFrame(() => fx.roll3D(s.dieVal, document.querySelector('.die3d'), (document.getElementById('board') || app).querySelector('.pzoom, .oca-wrap')?.getBoundingClientRect(), sound.play));
+  }
   const f = s.fx && S.lastFx !== s.fx.id ? s.fx : null;
   if (f) {
     S.lastFx = f.id;
     // animación propia del juego (se lanza cuando el tablero nuevo ya está dibujado)
-    if (g.animate) S.pendingFx = { f, delay: rolled ? 650 : 0 };
+    if (g.animate) S.pendingFx = { f, delay: rolled ? 1500 : 0 };
     if (f.text) {
       const kind = f.type === 'win' ? 'win' : f.type === 'capture' ? 'capture' : f.type === 'bad' ? 'bad' : 'special';
       setTimeout(() => {
         if (!g.animate || f.type === 'win') sound.play(kind === 'win' ? 'win' : kind);
-        fx.banner(f.text, f.emoji || (kind === 'win' ? '🏆' : '✨'), kind);
+        const names = (r.seats || []).map((pid) => (r.players.find((p) => p.pid === pid) || {}).name || '?');
+        fx.banner(String(f.text).replace(/\{(\d)\}/g, (_, i) => names[i] || '?'), f.emoji || (kind === 'win' ? '🏆' : '✨'), kind);
         if (kind === 'win') { fx.confetti(220); fx.fireworksShow(null, 7); vibrate([100, 60, 100, 60, 300]); }
         else vibrate(kind === 'capture' ? 140 : 40);
-      }, (rolled ? 650 : 120) + (f.bannerDelay || 0));
+      }, (rolled ? 1500 : 120) + (f.bannerDelay || 0));
     }
   }
   if (!rolled && (!f || (!f.text && !g.animate))) sound.play(g.moveSound || 'move');
   if (S.mode !== 'local' && S.mode !== 'demo') {
     const mine = g.turnOf(s) === mySeat() && mySeat() != null;
-    if (mine && !S.wasMine) setTimeout(() => { sound.play('turn'); vibrate(60); }, rolled ? 900 : 300);
+    if (mine && !S.wasMine) setTimeout(() => { sound.play('turn'); vibrate(60); }, rolled ? 1700 : 300);
     S.wasMine = mine;
   }
 }

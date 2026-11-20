@@ -620,3 +620,37 @@ canvas.race { display: block; width: 100%; height: min(62vh, 560px); touch-actio
 .parchis .homeslots { width: 56%; height: auto; aspect-ratio: 1; }
 .pzoom .parchis .cell .pawn svg { height: 100%; width: auto; max-width: 100%; }
 .pzoom .parchis .cell .pawn svg.piece { width: 100%; height: auto; }
+
+/* ============ Dado 3D ============ */
+.die3d { perspective: 400px; display: grid; place-items: center; background: none !important; box-shadow: none !important; width: 92px !important; height: 92px !important; }
+.die3d .cube { --s: 62px; }
+.cube { --s: 60px; width: var(--s); height: var(--s); position: relative; transform-style: preserve-3d; transform: rotateX(calc(var(--rx, 0deg) - 18deg)) rotateY(calc(var(--ry, 0deg) + 24deg)); }
+.cube .face { position: absolute; inset: 0; border-radius: 18%; background: radial-gradient(circle at 30% 25%, #fff, #f1ede4 60%, #ddd6c6); border: 1px solid #cfc6b2; display: grid; grid-template: repeat(3, 1fr) / repeat(3, 1fr); padding: 14%; box-shadow: inset 0 0 calc(var(--s) * .12) rgba(0,0,0,.12); backface-visibility: hidden; }
+.cube .face i { display: block; border-radius: 50%; margin: 12%; }
+.cube .face i.pip { background: radial-gradient(circle at 35% 35%, #5c5470, #1c1630); box-shadow: inset 0 1px 1px rgba(255,255,255,.3); }
+.cube .f1 i.pip { background: radial-gradient(circle at 35% 35%, #ff6b6b, #c92a2a); transform: scale(1.35); }
+.cube .f1 { transform: translateZ(calc(var(--s) / 2)); }
+.cube .f6 { transform: rotateY(180deg) translateZ(calc(var(--s) / 2)); }
+.cube .f2 { transform: rotateY(90deg) translateZ(calc(var(--s) / 2)); }
+.cube .f5 { transform: rotateY(-90deg) translateZ(calc(var(--s) / 2)); }
+.cube .f3 { transform: rotateX(90deg) translateZ(calc(var(--s) / 2)); }
+.cube .f4 { transform: rotateX(-90deg) translateZ(calc(var(--s) / 2)); }
+.die3d:not(:disabled) .cube { animation: cubeidle 2.2s ease-in-out infinite; }
+.die3d:not(:disabled)::after { content: '¡Tira!'; position: absolute; bottom: -4px; background: var(--c); color: #fff; font-weight: 800; font-size: .8rem; padding: 1px 10px; border-radius: 999px; box-shadow: 0 2px 4px rgba(0,0,0,.3); animation: arrowbob2 .6s ease-in-out infinite alternate; }
+.die3d { position: relative; }
+.die3d:disabled { opacity: .6; }
+@keyframes cubeidle { 0%, 100% { transform: rotateX(calc(var(--rx, 0deg) - 18deg)) rotateY(calc(var(--ry, 0deg) + 24deg)) translateY(0); } 50% { transform: rotateX(calc(var(--rx, 0deg) - 30deg)) rotateY(calc(var(--ry, 0deg) + 40deg)) translateY(-6px); } }
+.dicefly { position: fixed; left: 0; top: 0; z-index: 69; pointer-events: none; }
+.dicescene { width: 100%; height: 100%; perspective: 600px; display: grid; place-items: center; }
+.dicefly .cube .face { box-shadow: inset 0 0 10px rgba(0,0,0,.15), 0 0 0 1px rgba(0,0,0,.05); }
+.diceshadow { position: absolute; left: 15%; right: 15%; bottom: -2%; height: 14%; border-radius: 50%; background: rgba(0,0,0,.35); filter: blur(4px); }
+.firstrolls { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-bottom: 8px; }
+.fr { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,.92); border-radius: 999px; padding: 3px 10px 3px 4px; font-size: .9rem; }
+.fr span { font-size: 1.3rem; } .fr i { font-style: normal; font-size: 1.6rem; line-height: 1; }
+.fr.now { background: #ffe066; transform: scale(1.08); box-shadow: 0 0 0 3px #fff; }
+.fr.out { opacity: .45; }
+
+/* Barra del dado siempre visible abajo (el tablero es alto) */
+.dicebar { position: sticky; bottom: 8px; z-index: 6; background: rgba(43, 18, 102, .88); border-radius: 22px; padding: 8px 12px; backdrop-filter: blur(6px); box-shadow: 0 8px 20px rgba(0,0,0,.35); }
+.dicebar .log { max-height: 66px; overflow: hidden; }
+@media (orientation: portrait) { .pzoom .parchis-wrap { aspect-ratio: 1 / 1.28; } }

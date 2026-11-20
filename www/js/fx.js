@@ -373,3 +373,47 @@ export function animateFrom(root, before, skip = []) {
     );
   });
 }
+
+// ------------------------------------------------------------------ dado 3D que rueda
+import { diceCubeHTML, CUBE_ROT } from './util.js';
+/** Lanza un dado en 3D desde "fromEl": vuela en arco dando vueltas, rebota y muestra "value". */
+export async function roll3D(value, fromEl, toRect, playSound) {
+  if (!fromEl) return;
+  const a = center(fromEl);
+  const r = toRect || { left: 0, top: innerHeight * 0.2, width: innerWidth, height: innerHeight * 0.5 };
+  const to = { x: r.left + r.width * (0.35 + Math.random() * 0.3), y: r.top + r.height * (0.35 + Math.random() * 0.3) };
+  const size = Math.min(110, Math.max(70, innerWidth * 0.2));
+  const wrap = document.createElement('div');
+  wrap.className = 'dicefly';
+  wrap.style.width = wrap.style.height = size + 'px';
+  wrap.innerHTML = `<div class="diceshadow"></div><div class="dicescene">${diceCubeHTML(value)}</div>`;
+  document.body.appendChild(wrap);
+  const cube = wrap.querySelector('.cube');
+  const cs = Math.round(size * 0.7);
+  cube.style.setProperty('--s', cs + 'px');
+  const [rx, ry] = CUBE_ROT[value];
+  const sx = rx - 18 + 360 * (2 + Math.round(Math.random())), sy = ry + 24 + 360 * (2 + Math.round(Math.random()));
+  const pos = (x, y, s = 1) => `translate(${x - size / 2}px, ${y - size / 2}px) scale(${s})`;
+  const dur = 1150;
+  // trayectoria: sale del botón, sube, cae, rebota dos veces y se para
+  wrap.animate([
+    { transform: pos(a.x, a.y, 0.4), offset: 0 },
+    { transform: pos((a.x + to.x) / 2, Math.min(a.y, to.y) - 160, 1.25), offset: 0.38 },
+    { transform: pos(to.x, to.y, 1), offset: 0.62 },
+    { transform: pos(to.x + 8, to.y - 38, 1.05), offset: 0.74 },
+    { transform: pos(to.x + 12, to.y, 1), offset: 0.85 },
+    { transform: pos(to.x + 14, to.y - 10, 1.02), offset: 0.92 },
+    { transform: pos(to.x + 15, to.y, 1), offset: 1 },
+  ], { duration: dur, easing: 'ease-out', fill: 'forwards' });
+  cube.animate([
+    { transform: `rotateX(${Math.random() * 360}deg) rotateY(${Math.random() * 360}deg) rotateZ(40deg)` },
+    { transform: `rotateX(${sx}deg) rotateY(${sy}deg) rotateZ(0deg)` },
+  ], { duration: dur * 0.92, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'forwards' });
+  setTimeout(() => { dust(to.x, to.y + size * 0.4, size * 0.6, 'rgba(255,255,255,.8)'); if (playSound) playSound('place'); }, dur * 0.62);
+  setTimeout(() => { if (playSound) playSound('place'); }, dur * 0.85);
+  await wait(dur + 650);
+  sparkle(to.x + 15, to.y, '#ffe066', 10, 1);
+  const b = center(fromEl.isConnected ? fromEl : document.querySelector('.die3d') || fromEl);
+  await wrap.animate([{ transform: pos(to.x + 15, to.y, 1), opacity: 1 }, { transform: pos(b.x, b.y, 0.35), opacity: 0.2 }], { duration: 380, easing: 'ease-in', fill: 'forwards' }).finished;
+  wrap.remove();
+}

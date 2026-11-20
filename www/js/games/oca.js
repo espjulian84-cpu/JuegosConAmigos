@@ -1,4 +1,5 @@
-import { clone, die, esc, fail, pushLog, PLAYER_COLORS } from '../util.js';
+import { clone, die, esc, fail, pushLog, PLAYER_COLORS, diceCubeHTML, firstRollSetup, firstRollStep } from '../util.js';
+import { firstRollsHTML } from './parchis.js';
 import { buildBoard, GOOSE_ICON, GOOSE_FLY } from './oca-board.js';
 import { pieceSVG, PIECE_CHOICES } from './pieces.js';
 
@@ -63,7 +64,7 @@ export default {
     </ul>`,
 
   setup(n, opts = {}) {
-    return { n, pos: Array(n).fill(0), skip: Array(n).fill(0), pozo: null, turn: 0, v: 0, dieVal: null, log: ['¡Que empiece la carrera!'], teams: opts.teams || null, ficha: (opts.options && opts.options.ficha) || 'chapa' };
+    return { n, pos: Array(n).fill(0), skip: Array(n).fill(0), pozo: null, turn: 0, v: 0, dieVal: null, log: ['🎲 Tirada inicial: empieza quien saque más'], first: firstRollSetup(n), teams: opts.teams || null, ficha: (opts.options && opts.options.ficha) || 'chapa' };
   },
   turnOf: (s) => (s.over ? null : s.turn),
   isOver: (s) => !!s.over,
@@ -78,6 +79,11 @@ export default {
     const d = s.demo && a.die ? a.die : die();
     s.dieVal = d;
     s.rollId = s.v;
+    if (s.first) {
+      const w = firstRollStep(s, seat, d);
+      if (w != null) { pushLog(s, `{${w}} empieza la carrera`); s.fx = { id: s.v, type: 'special', text: `¡Empieza {${w}} con un ${s.firstWinner.d}!`, emoji: '🎲' }; }
+      return s;
+    }
     const from = s.pos[seat];
     const walk = [];
     let p = from;
@@ -130,6 +136,7 @@ export default {
 
   demo() {
     const s = this.setup(2);
+    s.first = null;
     return {
       state: s,
       steps: [
@@ -170,15 +177,17 @@ export default {
 
     let status;
     if (s.over) status = `🏆 ¡Gana ${ctx.winnerName(s.winner)}!`;
+    else if (s.first) status = myTurn ? '🎲 ¡Tirada inicial! Tira: el número más alto empieza' : `🎲 Tirada inicial: tira <b>${esc(ctx.players[s.turn])}</b>`;
     else status = myTurn ? '👉 ¡Te toca! Tira el dado' : `Turno de <b>${esc(ctx.players[s.turn])}</b>`;
 
     el.innerHTML = `
       <div class="players">${players}</div>
       <div class="status">${status}</div>
+      ${s.first ? firstRollsHTML(s, ctx) : ''}
       <div class="oca-wrap ${zoomed() ? 'zoom' : ''}"><div class="oca-board2">${BOARD_SVG}<div class="otoks2">${toks}</div></div></div>
       <div class="ocazoom"><button class="btn small" data-zoom>${zoomed() ? '🔎 Ver tablero entero' : '🔍 Ampliar tablero'}</button></div>
       <div class="dicebar">
-        <button class="die3d ${s.rollId === s.v ? 'rolling' : ''}" data-roll ${myTurn ? '' : 'disabled'} style="--c:${PLAYER_COLORS[s.turn]}"><span>${s.dieVal ? DIE_FACES[s.dieVal] : '🎲'}</span></button>
+        <button class="die3d" data-roll ${myTurn ? '' : 'disabled'} style="--c:${PLAYER_COLORS[s.turn]}">${diceCubeHTML(s.dieVal || 5)}</button>
         <div class="log">${(s.log || []).slice(0, 3).map((l) => `<div>${ctx.fmt(l)}</div>`).join('')}</div>
       </div>`;
     el.querySelector('[data-roll]').onclick = () => ctx.send({ type: 'roll' });
