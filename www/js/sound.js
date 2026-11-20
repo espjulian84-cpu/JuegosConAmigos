@@ -58,9 +58,31 @@ const SOUNDS = {
   flip: () => noise(0, 0.08, 0.25, 3000, 'highpass'),
   launch: () => { noise(0, 0.7, 0.25, 200, 'bandpass', 2500); tone(300, 0, 0.6, 'sawtooth', 0.05, 900); },
   engine: () => tone(110, 0, 0.3, 'sawtooth', 0.05, 160),
+  start: () => { tone(880, 0, 0.5, 'square', 0.12); tone(1320, 0, 0.5, 'triangle', 0.1); },
+  beep: () => tone(440, 0, 0.25, 'square', 0.1),
+  bump: () => { noise(0, 0.15, 0.3, 500, 'lowpass'); tone(120, 0, 0.12, 'square', 0.08, 60); },
   invite: () => [660, 880, 990].forEach((f, i) => tone(f, i * 0.1, 0.2, 'sine', 0.16)),
 };
+// motor continuo: el tono sube con la velocidad del coche
+let eng = null;
+function engine(speed) {
+  const a = ac(); if (!a) return;
+  if (!eng) {
+    const o = a.createOscillator(), o2 = a.createOscillator(), g = a.createGain(), f = a.createBiquadFilter();
+    o.type = 'sawtooth'; o2.type = 'square'; f.type = 'lowpass'; f.frequency.value = 700; g.gain.value = 0.0001;
+    o.connect(f); o2.connect(f); f.connect(g).connect(a.destination); o.start(); o2.start();
+    eng = { o, o2, g };
+  }
+  const t = a.currentTime;
+  eng.o.frequency.setTargetAtTime(45 + speed * 0.42, t, 0.08);
+  eng.o2.frequency.setTargetAtTime(22 + speed * 0.21, t, 0.08);
+  eng.g.gain.setTargetAtTime(0.035 + Math.min(0.05, speed / 7000), t, 0.1);
+}
+function stopEngine() { if (eng) { try { eng.o.stop(); eng.o2.stop(); } catch {} eng = null; } }
+
 export function play(name) {
-  if (muted) return;
+  if (name === 'stopEngine') { stopEngine(); return; }
+  if (muted) { stopEngine(); return; }
+  if (name.startsWith('engine:')) { engine(+name.slice(7) || 0); return; }
   try { SOUNDS[name] && SOUNDS[name](); } catch {}
 }

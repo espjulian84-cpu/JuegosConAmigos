@@ -115,6 +115,9 @@ function hostMsg(connId, m) {
     for (const [cid, ppid] of S.connPid) if (ppid === pid && cid !== connId) S.connPid.delete(cid);
     S.connPid.set(connId, pid);
     broadcastRoom();
+  } else if (m.t === 'in') {
+    const pid = S.connPid.get(connId);
+    if (pid && r.seats) { const seat = r.seats.indexOf(pid); if (seat >= 0) S.rtInputs[seat] = m.i; }
   } else if (m.t === 'act') {
     const pid = S.connPid.get(connId);
     if (!pid || !r.state) return;
@@ -229,7 +232,7 @@ function startGame() {
   r.teamsArr = teams;
   r.gameId = g.id;
   r.gameNo = (r.gameNo || 0) + 1;
-  r.state = g.setup(order.length, { teams, options: gameOptions(r, g) });
+  r.state = g.setup(order.length, { teams, options: gameOptions(r, g), local: S.mode === 'local' });
   r.players.forEach(upsertFriend);
   broadcastRoom();
 }
@@ -244,11 +247,12 @@ function rematch() {
   const r = S.room;
   const g = getGame(r.gameId);
   r.gameNo++;
-  r.state = g.setup(r.seats.length, { teams: r.teamsArr, options: gameOptions(r, g) });
+  r.state = g.setup(r.seats.length, { teams: r.teamsArr, options: gameOptions(r, g), local: S.mode === 'local' });
   broadcastRoom();
 }
 function backToLobby() {
   const r = S.room;
+  stopRtLoop();
   r.gameId = null; r.state = null; r.seats = null;
   if (S.mode === 'host') r.players = r.players.filter((p) => p.online);
   broadcastRoom();
@@ -278,6 +282,7 @@ function clientMsg(m) {
   if (S.mode !== 'client') return;
   S.lastMsg = Date.now();
   if (m.t === 'room') { S.room = m.room; S.reconnecting = false; onRoomUpdated(); }
+  else if (m.t === 'rt') { const g = S.room && S.room.gameId && getGame(S.room.gameId); if (g && g.onSnap) g.onSnap(m.snap); }
   else if (m.t === 'err') { toast(m.msg); if (m.fatal) leave(true); }
   else if (m.t === 'ping') S.conn && S.conn.send({ t: 'pong' });
   else if (m.t === 'bye') { toast('El anfitrión ha cerrado la sala'); leave(true); }
@@ -300,6 +305,7 @@ function leave(silent) {
   if (S.mode === 'host') { try { S.host.broadcast({ t: 'bye' }); } catch {} setTimeout(() => S.host && S.host.close(), 300); }
   if (S.mode === 'client' && S.conn) S.conn.close();
   if (S.demo) { clearTimeout(S.demo.timer); S.demo = null; }
+  stopRtLoop();
   clearTimeout(timerHandle); timerId = null;
   const wasDemo = S.mode === 'demo';
   S.mode = null; S.room = null; S.host = null; S.conn = null; S.reconnecting = false;
@@ -343,9 +349,40 @@ function startLocal() {
 // ======================================================================
 //  EVENTOS DE SALA → pantalla, sonidos y efectos
 // ======================================================================
+// ---------- juegos en tiempo real: el anfitrión simula y reparte posiciones ----------
+S.rtInputs = {};
+function startRtLoop() {
+  stopRtLoop();
+  const g = getGame(S.room.gameId);
+  S.rtInputs = {};
+  S.rtGameNo = S.room.gameNo;
+  let last = performance.now(), tick = 0;
+  S.rtLoop = setInterval(() => {
+    const r = S.room;
+    if (!r || !r.state || r.gameId !== g.id || r.gameNo !== S.rtGameNo) { stopRtLoop(); return; }
+    const now = performance.now();
+    g.step(r.state, S.rtInputs, Math.min(0.1, (now - last) / 1000));
+    last = now;
+    if (++tick % 2 === 0 || r.state.over) {
+      const snap = g.snapshot(r.state);
+      if (S.mode === 'host') S.host.broadcast({ t: 'rt', snap });
+      g.onSnap(snap);
+    }
+    if (r.state.over) { stopRtLoop(); r.state.v++; broadcastRoom(); }
+  }, 33);
+}
+function stopRtLoop() { if (S.rtLoop) { clearInterval(S.rtLoop); S.rtLoop = null; } }
+
 function onRoomUpdated() {
   const r = S.room;
   if (!r) return;
+  const rg = r.gameId && r.state && getGame(r.gameId);
+  if (rg && rg.realtime) {
+    if ((S.mode === 'host' || S.mode === 'local') && !r.state.over && (!S.rtLoop || S.rtGameNo !== r.gameNo)) startRtLoop();
+    // durante la carrera no se redibuja la pantalla: el lienzo se actualiza solo
+    if (S.screen === 'game' && S.gameNo === r.gameNo && !r.state.over && !S.rtDirty) return;
+    S.rtDirty = false;
+  }
   if (r.gameId && r.state) {
     if (S.screen !== 'game' || S.gameNo !== r.gameNo) { S.screen = 'game'; S.ui = {}; S.gameNo = r.gameNo; S.curtainSeat = null; S.lastFx = null; S.lastV = null; S.wasMine = false; }
     playEffects();
@@ -600,6 +637,7 @@ function makeCtx() {
     },
     toast,
     sound: (n) => sound.play(n),
+    sendInput: (i) => { if (S.mode === 'client') { if (S.conn) S.conn.send({ t: 'in', i }); } else S.rtInputs[mySeat() ?? 0] = i; },
     fx,
     state: s,
     timeLeft,

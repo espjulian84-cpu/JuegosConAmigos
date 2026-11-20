@@ -21,6 +21,16 @@ function step(g, s) {
 
 function play(g, n, teams, options) {
   let s = g.setup(n, { teams, options });
+  if (g.realtime) {
+    // carrera: todos los coches los conduce la máquina; 30 pasos por segundo
+    s.cars.forEach((c) => { c.bot = true; });
+    for (let k = 0; k < 30 * 400; k++) {
+      g.step(s, {}, 1 / 30);
+      if (k % 2 === 0) JSON.stringify(g.snapshot(s));
+      if (s.over) { assert.ok(s.order.length === s.n, 'todos clasificados'); return s; }
+    }
+    throw new Error(`${g.id}: la carrera no termina`);
+  }
   for (let k = 0; k < 30000; k++) {
     if (g.isOver(s)) return s;
     s = step(g, s);
@@ -34,7 +44,8 @@ for (const g of GAMES) {
   const optSets = [{}];
   (g.options || []).forEach((op) => { if (op.type === 'choice') op.choices.forEach((c) => optSets.push({ [op.id]: c.v })); else optSets.push({ [op.id]: !op.def }); });
   for (let n = g.minPlayers; n <= g.maxPlayers; n++) {
-    for (let k = 0; k < 60; k++) { const s = play(g, n, null, optSets[k % optSets.length]); assert.ok(s.winner != null, `${g.id} sin ganador`); total++; }
+    const reps = g.realtime ? 3 : 60;
+    for (let k = 0; k < reps; k++) { const s = play(g, n, null, optSets[k % optSets.length]); assert.ok(s.winner != null, `${g.id} sin ganador`); total++; }
   }
   if (g.teams) for (let k = 0; k < 60; k++) { play(g, 4, [0, 1, 0, 1], {}); total++; }
   // partida de ejemplo: todos los pasos deben ser válidos
