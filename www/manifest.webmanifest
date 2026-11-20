@@ -1,0 +1,1 @@
+{ "name": "Juegos con Amigos", "short_name": "Juegos", "start_url": "./", "display": "standalone", "background_color": "#3b1f8f", "theme_color": "#3b1f8f", "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }] }

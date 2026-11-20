@@ -1,0 +1,67 @@
+name: Compilar APK
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Tests de los juegos
+        run: npm test
+
+      - name: Preparar proyecto Android
+        run: |
+          npm run vendor
+          npx cap add android
+          npx --yes @capacitor/assets@3.0.5 generate --android --assetPath assets
+          # permiso de vibración (avisos de turno)
+          sed -i 's#<uses-permission android:name="android.permission.INTERNET" />#<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.VIBRATE" />#' android/app/src/main/AndroidManifest.xml
+          # versión = número de compilación (permite actualizar la app instalada)
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/" android/app/build.gradle
+          npx cap sync android
+          # firma fija para que cada APK nuevo actualice al anterior sin desinstalar
+          mkdir -p ~/.android && cp keystore/debug.keystore ~/.android/debug.keystore
+
+      - name: Compilar APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Renombrar APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk JuegosConAmigos.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JuegosConAmigos-apk
+          path: JuegosConAmigos.apk
+
+      - name: Publicar en Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Juegos con Amigos 1.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: true
+          files: JuegosConAmigos.apk
+          body: |
+            📲 Descarga **JuegosConAmigos.apk** desde el móvil e instálala (permite "instalar apps de origen desconocido" si te lo pide).
+            Rama: ${{ github.ref_name }} · Commit: ${{ github.sha }}

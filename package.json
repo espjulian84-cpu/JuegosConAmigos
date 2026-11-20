@@ -1,0 +1,22 @@
+{
+  "name": "juegos-con-amigos",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Juegos de mesa para jugar con amigos conectados (hasta 6 jugadores)",
+  "scripts": {
+    "vendor": "node scripts/copy-vendor.js",
+    "serve": "npm run vendor && npx --yes http-server www -p 8080 -c-1",
+    "test": "node test/engines.test.js",
+    "build:android": "npm run vendor && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.2",
+    "@capacitor/core": "8.6.2",
+    "peerjs": "1.5.5",
+    "qrcode-generator": "^2.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2"
+  }
+}

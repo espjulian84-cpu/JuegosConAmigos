@@ -1,0 +1,8 @@
+{
+  "appId": "com.juegosconamigos.app",
+  "appName": "Juegos con Amigos",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}
