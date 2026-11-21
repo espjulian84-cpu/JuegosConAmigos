@@ -17,6 +17,20 @@ Cada vez que se sube un cambio, GitHub compila la app sola:
 | ⚓ **Hundir la flota** | 2-4 / equipos | Bombas en arco, salpicaduras, explosiones, barcos que se hunden |
 | 🏎️ **Mini Bólidos** | 1-6 + máquina | Carreras en tiempo real, 3 circuitos |
 | 🧱 **Muros** | 2-4 / equipos | ■ cuadrada como la torre, ● redonda en L, 💥 rompe-muros opcional |
+| 🏙️ **Gran Ciudad** | 2-6 | Comprar calles, alquileres, casas y hoteles, cartas Sorpresa/Caja, cárcel |
+| 🔢 **Rumi** | 2-4 | Fichas de números y colores, series y grupos, mesa reordenable |
+| ⭕ **Tres en raya** / 🔴 **Cuatro en raya** | 2 | A 1, 3 o 5 victorias |
+| ⚪ **Damas** | 2 | Reglas españolas: comer obligatorio y la dama vuela |
+| ♞ **Ajedrez** | 2 | Completo: enroque, al paso, coronación, mate y tablas |
+| 🗡️ **Brisca** | 2-4 / parejas | Baraja española dibujada, cambio del 7/2 de triunfo |
+| 🤥 **Mentiroso** | 2-6 | Echa cartas boca abajo… o miente |
+| ♠️ **Póker** | 2-6 | Texas Hold'em con fichas, ciegas, botes y faroles |
+| 🂡 **Solitario** | 1-6 | Todos con las mismas cartas: ¿quién lo acaba antes? |
+| 🧠 **Sabelotodo** | 2-6 / equipos | Rueda de preguntas en 6 categorías y estrellas |
+| ✋ **¡Stop!** | 2-6 | Letra al azar, categorías, votación de respuestas |
+| 🎨 **Dibuja y adivina** | 2-6 | Dibujo en directo con el dedo, adivinar sin escribir |
+
+Todos los juegos tienen **jugadores máquina** 🤖 para jugar solo o completar la mesa (también en salas por internet).
 
 Fichas a elegir: peón, chapas de botellín, canicas, gominolas o tazos. Cada juego tiene **instrucciones y una partida de ejemplo animada**.
 

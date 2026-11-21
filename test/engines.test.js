@@ -11,12 +11,18 @@ import { GameError } from '../www/js/util.js';
 
 function step(g, s) {
   // los temporizadores (esconder cartas, tiempo agotado) los dispara "el sistema"
-  if (s.timer && (g.turnOf(s) == null || Math.random() < 0.05 || s.phase === 'reveal')) {
+  if (s.timer && ((g.turnOf(s) == null && !g.actors) || Math.random() < 0.05 || s.phase === 'reveal')) {
     try { return g.action(s, 'sys', s.timer.action); } catch (e) { if (!(e instanceof GameError)) throw e; }
   }
   let seat = g.turnOf(s);
+  if (g.actors) { const as = g.actors(s); seat = as[Math.floor(Math.random() * as.length)]; }
   if (seat == null) seat = 0; // p. ej. "siguiente ronda" del dominó
-  return g.action(s, seat, g.bot(s, seat));
+  const a = g.bot(s, seat);
+  if (!a) {
+    if (s.timer) return g.action(s, 'sys', s.timer.action);
+    return s;
+  }
+  return g.action(s, seat, a);
 }
 
 function play(g, n, teams, options) {
@@ -44,7 +50,7 @@ for (const g of GAMES) {
   const optSets = [{}];
   (g.options || []).forEach((op) => { if (op.type === 'choice') op.choices.forEach((c) => optSets.push({ [op.id]: c.v })); else optSets.push({ [op.id]: !op.def }); });
   for (let n = g.minPlayers; n <= g.maxPlayers; n++) {
-    const reps = g.realtime ? 3 : 60;
+    const reps = g.realtime ? 3 : ({ ajedrez: 2, poker: 4, damas: 6, cuatro: 10, tres: 20 }[g.id] ?? 60);
     for (let k = 0; k < reps; k++) { const s = play(g, n, null, optSets[k % optSets.length]); assert.ok(s.winner != null, `${g.id} sin ganador`); total++; }
   }
   if (g.teams) for (let k = 0; k < 60; k++) { play(g, 4, [0, 1, 0, 1], {}); total++; }
@@ -54,7 +60,10 @@ for (const g of GAMES) {
     let s = d.state; s.demo = true;
     for (const st of d.steps) {
       if (st.patch) st.patch(s);
-      if (st.a) { s = g.action(s, st.seat, st.a); while (s.timer && s.phase === 'reveal') s = g.action(s, 'sys', s.timer.action); }
+      if (st.a) {
+        try { s = g.action(s, st.seat, st.a); } catch (e) { throw new Error(`${g.id} demo paso "${st.say}": ${e.message}`); }
+        while (s.timer && !g.isOver(s) && (s.phase === 'reveal' || (!g.actors && g.turnOf(s) == null))) s = g.action(s, 'sys', s.timer.action);
+      }
     }
   }
   // información oculta

@@ -61,6 +61,13 @@ const SOUNDS = {
   start: () => { tone(880, 0, 0.5, 'square', 0.12); tone(1320, 0, 0.5, 'triangle', 0.1); },
   beep: () => tone(440, 0, 0.25, 'square', 0.1),
   bump: () => { noise(0, 0.15, 0.3, 500, 'lowpass'); tone(120, 0, 0.12, 'square', 0.08, 60); },
+  coin: () => { tone(1320, 0, 0.08, 'square', 0.1); tone(1760, 0.08, 0.3, 'square', 0.1); },
+  cash: () => { [0, 0.06, 0.12].forEach((t) => noise(t, 0.05, 0.2, 5000, 'highpass')); tone(1568, 0.15, 0.35, 'triangle', 0.15); tone(2093, 0.22, 0.4, 'triangle', 0.12); },
+  deal: () => { noise(0, 0.06, 0.2, 2500, 'highpass'); noise(0.07, 0.06, 0.18, 2500, 'highpass'); },
+  ding: () => { tone(1047, 0, 0.5, 'sine', 0.2); tone(1568, 0.1, 0.6, 'sine', 0.14); },
+  buzz: () => tone(140, 0, 0.45, 'sawtooth', 0.15, 110),
+  tick: () => tone(1500, 0, 0.03, 'square', 0.05),
+  knock: () => { tone(160, 0, 0.07, 'triangle', 0.25); tone(160, 0.14, 0.07, 'triangle', 0.25); },
   invite: () => [660, 880, 990].forEach((f, i) => tone(f, i * 0.1, 0.2, 'sine', 0.16)),
 };
 // motor continuo: el tono sube con la velocidad del coche

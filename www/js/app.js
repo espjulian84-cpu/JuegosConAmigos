@@ -2,7 +2,7 @@
 // El móvil que crea la sala es el "anfitrión": aplica las reglas (motores en games/)
 // y reparte el estado a los demás. Los demás solo envían sus jugadas.
 
-import { GAMES, getGame } from './games/index.js';
+import { GAMES, getGame, GAME_CATS } from './games/index.js';
 import * as net from './net.js';
 import * as sound from './sound.js';
 import * as fx from './fx.js';
@@ -33,7 +33,7 @@ let wishlist = LS.get('wishlist', []);
 const saveFriends = () => LS.set('friends', friends);
 
 function upsertFriend(p) {
-  if (!p || !p.pid || p.pid === me.pid || p.pid.startsWith('L')) return;
+  if (!p || !p.pid || p.bot || p.pid === me.pid || p.pid.startsWith('L')) return;
   const f = friends.find((x) => x.pid === p.pid);
   if (f) { f.name = p.name || f.name; f.avatar = p.avatar || f.avatar; f.last = Date.now(); }
   else friends.unshift({ pid: p.pid, name: p.name || 'Amigo', avatar: p.avatar || '🙂', last: Date.now() });
@@ -490,21 +490,33 @@ function showTeamDraw() {
 
 const isBotSeat = (k) => { const r = S.room; const p = r && r.seats && r.players.find((x) => x.pid === r.seats[k]); return !!(p && p.bot); };
 
-// La máquina juega sola cuando le toca (modo "en este móvil")
+// La máquina juega sola cuando le toca (en este móvil y también en salas por internet: la mueve el anfitrión).
+// Los juegos simultáneos (Stop, Solitario, Dibuja…) dicen con actors(s) quién puede jugar ahora mismo.
 function botTick() {
   const r = S.room;
-  if (S.mode !== 'local' || !r || !r.state || !r.gameId) return;
+  if ((S.mode !== 'local' && S.mode !== 'host') || !r || !r.state || !r.gameId) return;
   const g = getGame(r.gameId);
   if (g.realtime || g.isOver(r.state)) return;
-  const t = g.turnOf(r.state);
-  if (t == null || !isBotSeat(t) || S.botV === r.state.v) return;
-  S.botV = r.state.v;
-  const wait = r.state.rollId === r.state.v ? 1900 : 1100;
-  setTimeout(() => {
-    const cur = S.room;
-    if (S.mode !== 'local' || !cur || cur.state !== r.state) return;
-    try { const err = doAction(t, g.bot(cur.state, t)); if (err) console.warn('máquina:', err); } catch (e) { console.error(e); }
-  }, wait);
+  const actorsOf = (st) => (g.actors ? g.actors(st) : [g.turnOf(st)]).filter((k) => k != null && isBotSeat(k));
+  S.botBusy = S.botBusy || {};
+  const gameNo = r.gameNo;
+  actorsOf(r.state).forEach((t) => {
+    const key = gameNo + ':' + t;
+    if (S.botBusy[key]) return;
+    S.botBusy[key] = true;
+    const base = g.botDelay ? g.botDelay(r.state, t) : (r.state.rollId === r.state.v ? 1900 : 1100);
+    setTimeout(() => {
+      S.botBusy[key] = false;
+      const cur = S.room;
+      if ((S.mode !== 'local' && S.mode !== 'host') || !cur || !cur.state || cur.gameNo !== gameNo || cur.gameId !== g.id || g.isOver(cur.state)) return;
+      if (!actorsOf(cur.state).includes(t)) { botTick(); return; }
+      let a = null;
+      try { a = g.bot(cur.state, t); } catch (e) { console.error(e); }
+      if (!a) { setTimeout(botTick, 1500); return; }
+      const err = doAction(t, a);
+      if (err) { console.warn('máquina:', err); setTimeout(botTick, 1500); }
+    }, base + Math.random() * 200);
+  });
 }
 
 function mySeat() {
@@ -717,7 +729,7 @@ function lobbyHTML() {
   const players = r.players.map((p, i) => `
     <div class="lplayer ${p.online ? '' : 'off'}" style="--pc:${PLAYER_COLORS[i]}">
       ${local ? `<button class="lavatar" data-lavatar="${i}">${p.avatar}</button>` : `<span class="lavatar">${p.avatar}</span>`}
-      <div class="grow">${local && p.bot ? `<b>${esc(p.name)}</b> <small>(máquina)</small>` : local ? `<input class="lname" data-lname="${i}" maxlength="16" value="${esc(p.name)}">` : `<b>${esc(p.name)}</b>${p.pid === r.hostPid ? ' 👑' : ''}${p.pid === me.pid ? ' <small>(tú)</small>' : ''}${p.v && r.hostV && p.v !== r.hostV ? `<div class="verwarn">⚠️ Tiene otra versión (${esc(p.v)}). ¡Actualizad todos a la misma!</div>` : ''}`}</div>
+      <div class="grow">${p.bot ? `<b>${esc(p.name)}</b> <small>(máquina)</small>` : local ? `<input class="lname" data-lname="${i}" maxlength="16" value="${esc(p.name)}">` : `<b>${esc(p.name)}</b>${p.pid === r.hostPid ? ' 👑' : ''}${p.pid === me.pid ? ' <small>(tú)</small>' : ''}${p.v && r.hostV && p.v !== r.hostV ? `<div class="verwarn">⚠️ Tiene otra versión (${esc(p.v)}). ¡Actualizad todos a la misma!</div>` : ''}`}</div>
       ${teamChip(r, p, isHost)}
       ${local && i > 0 ? `<button class="iconbtn" data-rmlocal="${i}">✖</button>` : ''}
     </div>`).join('');
@@ -736,11 +748,14 @@ function lobbyHTML() {
       <div class="qr" title="Escanea para descargar la app">${qrSVG(DOWNLOAD_URL)}<small>Descargar app</small></div>
     </div>`;
 
+  const startBar = isHost ? `<div class="startbar"><button class="btn big startbtn ${err ? 'disabled' : 'pulse'}" data-a="start">${err ? '⏳ ' + esc(err) : `▶ ¡Empezar ${g.name}!`}</button></div>` : '';
   const picker = isHost ? `
-    <h2 class="sect">Elige juego</h2>
-    <div class="gamepick">${GAMES.map((x) => `
+    <details class="pickdd" ${S.pickOpen ? 'open' : ''}>
+      <summary><span class="gpi">${g.icon}</span><div class="grow"><small>Juego elegido</small><b>${g.name}</b></div><span class="ddbtn">🎮 Cambiar ▾</span></summary>
+    ${GAME_CATS.map(([cat, label]) => { const list = GAMES.filter((x) => (x.cat || 'mesa') === cat); return list.length ? `<div class="gpcat">${label}</div><div class="gamepick">${list.map((x) => `
       <button class="gp ${x.id === r.sel ? 'on' : ''}" data-sel="${x.id}" style="--gc:${x.color}">
-        <span class="gpi">${x.icon}</span><b>${x.name}</b><small>${x.minPlayers}-${x.maxPlayers} jug.</small></button>`).join('')}</div>
+        <span class="gpi">${x.icon}</span><b>${x.name}</b><small>${x.minPlayers === x.maxPlayers ? x.minPlayers : `${x.minPlayers}-${x.maxPlayers}`} 👤</small></button>`).join('')}</div>` : ''; }).join('')}
+    </details>
     <div class="optrow"><button class="btn small" data-rules="${g.id}">📖 Cómo se juega</button></div>
     ${(g.options || []).map((op) => {
       const cur = gameOptions(r, g)[op.id];
@@ -749,8 +764,8 @@ function lobbyHTML() {
     }).join('')}
     ${g.teams ? `<div class="seg"><button class="${r.teamMode ? '' : 'on'}" data-mode="solo">👤 Cada uno por su cuenta</button><button class="${r.teamMode ? 'on' : ''}" data-mode="teams">🤝 Por equipos${g.teams === 'pairs4' ? ' (parejas)' : ''}</button></div>
       ${r.teamMode ? `${teamColumns(r, true)}<div class="row center"><button class="btn c3" data-a="shuffleteams">🎲 Sortear equipos</button></div><p class="hint light">Toca a un jugador para cambiarlo de equipo.</p>` : ''}` : ''}
-    ${local && r.players.length < MAX_PLAYERS ? '<div class="row"><button class="btn ghost" data-a="addlocal">➕ Añadir persona</button><button class="btn ghost" data-a="addbot">🤖 Añadir máquina</button></div>' : ''}
-    <button class="btn big startbtn ${err ? 'disabled' : 'pulse'}" data-a="start">${err ? '⏳ ' + esc(err) : `▶ ¡Empezar ${g.name}!`}</button>`
+    ${r.players.length < MAX_PLAYERS ? `<div class="row">${local ? '<button class="btn ghost" data-a="addlocal">➕ Añadir persona</button>' : ''}<button class="btn ghost" data-a="addbot">🤖 Añadir máquina</button></div>` : ''}
+`
     : `${r.teamMode && g.teams ? teamColumns(r, false) : ''}<div class="card waiting"><div class="gpi big">${g.icon}</div><div>Juego elegido: <b>${g.name}</b>${r.teamMode ? ' · 🤝 por equipos' : ''}</div>
       <div class="hint">${(g.options || []).map((op) => { const v = gameOptions(r, g)[op.id]; return op.type === 'bool' ? `${op.label}: ${v ? 'sí' : 'no'}` : `${op.label}: ${op.choices.find((c) => c.v === v)?.label}`; }).join(' · ')}</div>
       <button class="btn small" data-rules="${g.id}">📖 Cómo se juega</button><div class="dots">Esperando a que el anfitrión empiece<span>.</span><span>.</span><span>.</span></div></div>`;
@@ -759,6 +774,7 @@ function lobbyHTML() {
     <header class="topbar"><button class="iconbtn" data-a="leave">←</button><div class="grow title">${local ? '📱 En este móvil' : '🏠 Sala de espera'}</div>${local ? '' : '<button class="iconbtn" data-a="chat">💬</button>'}<button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button></header>
     ${S.reconnecting ? '<div class="reconnect">📡 Reconectando…</div>' : ''}
     <div class="lobby">
+      ${startBar}
       ${invite}
       <h2 class="sect">Jugadores (${r.players.length}/${MAX_PLAYERS}) <small class="vertag">versión ${VERSION}</small></h2>
       <div class="lplayers">${players}</div>
@@ -806,6 +822,12 @@ function makeCtx() {
     state: s,
     timeLeft,
     rerender: () => renderGame(fx.snapshot(document.getElementById('board'))),
+    isBot: (k) => isBotSeat(k),
+    sendQuiet: (action) => {
+      if (S.mode === 'demo') return;
+      if (S.mode === 'client') { S.conn && S.conn.send({ t: 'act', action }); return; }
+      doAction(S.mode === 'local' ? mySeat() : r.seats.indexOf(me.pid), action);
+    },
     send: (action) => {
       sound.play('click');
       if (S.mode === 'demo') return;
@@ -817,6 +839,7 @@ function makeCtx() {
 }
 
 function renderGame(before) {
+  if (!S.room || !S.room.state || !S.room.seats || !S.room.gameId) return; // ya no hay partida (p. ej. se volvió a la sala)
   const r = S.room, g = getGame(r.gameId), s = r.state;
   const isHost = S.mode === 'host' || S.mode === 'local';
   const offline = r.players.filter((p) => !p.online && r.seats.includes(p.pid));
@@ -1053,8 +1076,13 @@ function bind() {
       case 'addbot': {
         const names = ['Robotín', 'Chispas', 'Tuerca', 'Bip-Bop', 'Pixel'];
         const nb = r.players.filter((p) => p.bot).length;
-        r.players.push({ pid: 'B' + nb + randCode(3), name: names[nb % names.length], avatar: '🤖', online: true, bot: true });
-        render(); break;
+        r.players.push({ pid: 'B' + nb + randCode(3), name: names[nb % names.length], avatar: ['🤖', '👾', '🦾', '🛸', '🎰'][nb % 5], online: true, bot: true });
+        if (S.mode === 'host') broadcastRoom(); else render(); break;
+      }
+      case 'delbot': {
+        const i = r.players.map((p) => !!p.bot).lastIndexOf(true);
+        if (i >= 0) { r.players.splice(i, 1); if (S.mode === 'host') broadcastRoom(); else render(); }
+        break;
       }
       case 'addwish': {
         const n = app.querySelector('#wname').value.trim();
@@ -1088,7 +1116,8 @@ function bind() {
     if (r.teamMode && !Object.keys(r.teams).length) r.players.forEach((p, i) => { r.teams[p.pid] = i % 2; });
     sound.play('click'); broadcastRoom();
   });
-  on('[data-sel]', (el) => { S.room.sel = el.dataset.sel; sound.play('click'); broadcastRoom(); });
+  on('[data-sel]', (el) => { S.room.sel = el.dataset.sel; S.pickOpen = false; sound.play('click'); broadcastRoom(); });
+  const dd = app.querySelector('.pickdd'); if (dd) dd.addEventListener('toggle', () => { S.pickOpen = dd.open; });
   on('[data-team]', (el) => { const r = S.room; const pid = el.dataset.team; r.teams[pid] = ((r.teams[pid] ?? 0) + 1) % (r.players.length >= 6 ? 3 : 2); sound.play('click'); broadcastRoom(); });
   on('[data-delwish]', (el) => { wishlist.splice(+el.dataset.delwish, 1); LS.set('wishlist', wishlist); render(); });
   on('[data-delfriend]', (el) => { friends.splice(+el.dataset.delfriend, 1); saveFriends(); render(); });

@@ -209,7 +209,7 @@ export default {
         : `<button class="btn big pulse" data-act="pass">🙅 Pasar</button>`;
     }
     if (ui.pick != null && myTurn) {
-      actions = `<div class="row"><button class="btn big" data-side="L">Poner en el extremo del ${ends[0]} ◀</button><button class="btn big" data-side="R">▶ Poner en el extremo del ${ends[1]}</button></div>`;
+      actions = `<div class="sidepick"><span>¿Dónde la pones?</span><button class="btn c1" data-side="L">◀ Junto al ${ends[0]}</button><button class="btn c2" data-side="R">Junto al ${ends[1]} ▶</button></div>`;
     }
 
     let status;
