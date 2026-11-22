@@ -122,6 +122,15 @@ function hostMsg(connId, m) {
     const pid = S.connPid.get(connId);
     const p = pid && r.players.find((x) => x.pid === pid);
     if (p) relayChat({ pid, name: p.name, avatar: p.avatar, text: String(m.text || '').slice(0, 80) });
+  } else if (m.t === 'vote') {
+    const pid = S.connPid.get(connId);
+    const p = pid && r.players.find((x) => x.pid === pid);
+    const vg = p && getGame(String(m.id));
+    if (vg && r.votes?.[pid] !== vg.id) {
+      r.votes = { ...(r.votes || {}), [pid]: vg.id };
+      relayChat({ pid, name: p.name, avatar: p.avatar, text: `🙋 ¡Quiero jugar a ${vg.icon} ${vg.name}!` });
+      broadcastRoom();
+    }
   } else if (m.t === 'askLobby') {
     const pid = S.connPid.get(connId);
     const p = pid && r.players.find((x) => x.pid === pid);
@@ -173,11 +182,57 @@ function showChat(c) {
   while (box.children.length > 3) box.firstChild.remove();
   setTimeout(() => b.classList.add('out'), 4200);
   setTimeout(() => b.remove(), 4700);
-  const cb = document.querySelector('[data-a="chat"]'); if (cb) fx.shake(cb);
+  syncChatBar(true);
+}
+
+// Barra de chat fija arriba: vive fuera de #app, así los movimientos del juego no la cierran
+// ni borran lo que estás escribiendo. Se cierra solo al enviar o al pulsar ✕.
+let chatEl = null;
+const CHAT_QUICK = ['¡Hola! 👋', 'Jajaja 😂', '¡Bien jugado! 👏', '¡Te voy a ganar! 😎', '¡Qué suerte! 🍀', '¡Venga, que te toca! ⏰', '¡Nooo! 😱', '¡Toma ya! 💪', '¡Gracias! 🙏', 'Uff… 😅', '¡Revancha! 🔁', '¡Buena partida! 🤝', 'JAJAJA 🤣', 'Muajaja 😈'];
+const CHAT_EMO = ['😂', '😎', '😡', '😱', '👏', '🔥', '❤️', '🤞', '🥳', '😭', '🙈', '👍', '🤯', '🎉'];
+function chatMsgHTML(c) { return `<div class="cmsg ${c.pid === me.pid ? 'mine' : ''}"><span>${esc(c.avatar)}</span><div><b>${esc(c.name)}</b>${esc(c.text)}</div></div>`; }
+function buildChatBar() {
+  chatEl = document.createElement('div');
+  chatEl.className = 'chatbar';
+  chatEl.innerHTML = `<button class="cbline" type="button"><span class="cbicon">💬</span><span class="cblast"></span><span class="cbopen">Escribir ✏️</span></button>
+    <div class="cbpanel">
+      <div class="chatlog"></div>
+      <div class="chips quick">${CHAT_QUICK.map((q) => `<button class="chip" data-say="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+      <div class="chips quick emos">${CHAT_EMO.map((e) => `<button class="chip" data-say="${e}">${e}</button>`).join('')}</div>
+      <form class="cbform"><input class="cbinput" maxlength="80" placeholder="Escribe un mensaje…" autocomplete="off" enterkeyhint="send"><button class="btn c2" type="submit">Enviar</button><button class="btn cbclose" type="button">✕</button></form>
+    </div>`;
+  const input = chatEl.querySelector('.cbinput');
+  const close = () => { chatEl.classList.remove('open'); document.body.classList.remove('chatopen'); input.blur(); };
+  const send = (t) => { sound.play('click'); sendChat(t); close(); };
+  chatEl.querySelector('.cbline').onclick = () => {
+    if (chatEl.classList.contains('open')) { close(); return; }
+    chatEl.classList.add('open'); document.body.classList.add('chatopen');
+    fillChatLog(); input.focus();
+  };
+  chatEl.querySelectorAll('[data-say]').forEach((b) => b.onclick = () => send(b.dataset.say));
+  chatEl.querySelector('.cbform').onsubmit = (e) => { e.preventDefault(); const v = input.value.trim(); if (!v) { input.focus(); return; } input.value = ''; send(v); };
+  chatEl.querySelector('.cbclose').onclick = close;
+  document.body.appendChild(chatEl);
+}
+function fillChatLog() {
+  const log = chatEl.querySelector('.chatlog');
+  log.innerHTML = (S.chat || []).slice(-40).map(chatMsgHTML).join('') || '<p class="hint center">Aún no hay mensajes. ¡Saluda! 👋</p>';
+  log.scrollTop = log.scrollHeight;
+}
+function syncChatBar(fresh) {
+  const show = (S.mode === 'host' || S.mode === 'client') && (S.screen === 'lobby' || S.screen === 'game');
+  if (!show) { if (chatEl) { chatEl.remove(); chatEl = null; } document.body.classList.remove('haschat', 'chatopen'); return; }
+  if (!chatEl) buildChatBar();
+  document.body.classList.add('haschat');
+  const last = (S.chat || [])[S.chat ? S.chat.length - 1 : 0];
+  chatEl.querySelector('.cblast').innerHTML = last ? `${esc(last.avatar)} <b>${esc(last.name)}:</b> ${esc(last.text)}` : '<i>Chat del grupo: toca para escribir</i>';
+  if (chatEl.classList.contains('open')) fillChatLog();
+  if (fresh) { chatEl.classList.remove('flash'); void chatEl.offsetWidth; chatEl.classList.add('flash'); }
 }
 
 function broadcastRoom() {
   const r = S.room;
+  armFrenzy();
   if (S.mode === 'host') {
     const g = r.gameId && getGame(r.gameId);
     if (g && g.viewFor && r.state) {
@@ -193,6 +248,55 @@ function broadcastRoom() {
   scheduleTimer();
   onRoomUpdated();
 }
+
+// ⚡ Modo frenético: 30 s por jugada en cualquier juego. Si se acaba el tiempo,
+// la máquina mueve por ese jugador. Solo lo controla quien manda (anfitrión o este móvil).
+const FRENZY_MS = 30000;
+let fzTimer = null, fzKey = null, fzAt = 0;
+const frenzyOn = (r, g) => !!(r && r.frenzy && g && !g.noFrenzy && !g.realtime);
+function armFrenzy() {
+  const r = S.room;
+  if (!r || (S.mode !== 'host' && S.mode !== 'local')) return;
+  const g = r.gameId && r.state && getGame(r.gameId);
+  const stop = () => { r.fz = null; fzKey = null; clearTimeout(fzTimer); };
+  if (!g || !frenzyOn(r, g) || g.isOver(r.state)) return stop();
+  const act = (g.actors ? g.actors(r.state) : [g.turnOf(r.state)]).filter((k) => k != null && !isBotSeat(k));
+  if (!act.length) return stop();
+  const key = `${r.gameNo}:${r.fzN || 0}:${act.join(',')}`;
+  if (key !== fzKey) {
+    fzKey = key; fzAt = Date.now() + FRENZY_MS;
+    clearTimeout(fzTimer);
+    fzTimer = setTimeout(() => frenzyTimeout(key), FRENZY_MS + 150);
+  }
+  r.fz = { key, seats: act, left: Math.max(0, fzAt - Date.now()) };
+}
+function frenzyTimeout(key) {
+  const r = S.room;
+  if (!r || key !== fzKey || !r.state) return;
+  const g = getGame(r.gameId);
+  let moved = false;
+  for (const seat of r.fz ? r.fz.seats : []) {
+    if (g.isOver(r.state)) break;
+    const now = (g.actors ? g.actors(r.state) : [g.turnOf(r.state)]);
+    if (!now.includes(seat)) continue;
+    let a = null;
+    try { a = g.bot(r.state, seat); } catch (e) { console.error(e); }
+    if (a && !doAction(seat, a)) moved = true;
+  }
+  if (moved) { toast('⏱️ ¡Se acabó el tiempo! Ha movido la máquina'); sound.play('buzz'); }
+  else { fzKey = null; broadcastRoom(); } // no se pudo mover: otros 30 s
+}
+// Cuenta atrás visible en la barra de arriba
+setInterval(() => {
+  const el = document.querySelector('.fzpill');
+  if (!el || !S.room || !S.room.fz) return;
+  const at = S.mode === 'client' ? S.fzAtLocal : fzAt;
+  const sec = Math.max(0, Math.ceil((at - Date.now()) / 1000));
+  el.querySelector('b').textContent = sec;
+  const hurry = sec <= 5;
+  el.classList.toggle('hurry', hurry);
+  if (hurry && sec > 0 && el.classList.contains('mine') && el.dataset.last !== String(sec)) { el.dataset.last = sec; sound.play('tick'); }
+}, 250);
 
 // Temporizadores del juego (tiempo por turno, esconder cartas…): solo los ejecuta quien manda.
 let timerHandle = null, timerId = null;
@@ -222,6 +326,7 @@ function doAction(seat, action) {
   const g = getGame(r.gameId);
   try {
     r.state = g.action(r.state, seat, action || {});
+    r.fzN = (r.fzN || 0) + 1;
   } catch (e) {
     if (e instanceof GameError) return e.message;
     console.error(e);
@@ -254,6 +359,7 @@ function startGame() {
   const err = validateStart(r);
   if (err) { toast(err); fx.shake(document.querySelector('.startbtn') || app); return; }
   const g = getGame(r.sel);
+  r.votes = {};
   // el orden se sortea: así no empieza siempre quien crea la sala
   let order = shuffle(r.players.filter((p) => p.online).map((p) => p.pid));
   let teams = null;
@@ -320,7 +426,7 @@ async function connectClient() {
 function clientMsg(m) {
   if (S.mode !== 'client') return;
   S.lastMsg = Date.now();
-  if (m.t === 'room') { S.room = m.room; S.reconnecting = false; onRoomUpdated(); }
+  if (m.t === 'room') { S.room = m.room; S.reconnecting = false; if (m.room.fz && m.room.fz.key !== S.fzKeyLocal) { S.fzKeyLocal = m.room.fz.key; S.fzAtLocal = Date.now() + m.room.fz.left; } onRoomUpdated(); }
   else if (m.t === 'rt') { const g = S.room && S.room.gameId && getGame(S.room.gameId); if (g && g.onSnap) g.onSnap(m.snap); }
   else if (m.t === 'err') { toast(m.msg); if (m.fatal) leave(true); }
   else if (m.t === 'ping') S.conn && S.conn.send({ t: 'pong' });
@@ -637,6 +743,7 @@ function render() {
   else if (S.screen === 'game') renderGame(before);
   bind();
   renderModal();
+  syncChatBar();
 }
 
 function homeHTML() {
@@ -749,12 +856,20 @@ function lobbyHTML() {
     </div>`;
 
   const startBar = isHost ? `<div class="startbar"><button class="btn big startbtn ${err ? 'disabled' : 'pulse'}" data-a="start">${err ? '⏳ ' + esc(err) : `▶ ¡Empezar ${g.name}!`}</button></div>` : '';
+  // Votos: los invitados ven todos los juegos y pueden pedir uno; el anfitrión ve quién pide qué
+  const votes = r.votes || {};
+  const votersOf = (id) => r.players.filter((p) => votes[p.pid] === id);
+  const myVote = votes[me.pid];
+  const gameList = (attr) => GAME_CATS.map(([cat, label]) => { const list = GAMES.filter((x) => (x.cat || 'mesa') === cat); return list.length ? `<div class="gpcat">${label}</div><div class="gamepick">${list.map((x) => { const vs = votersOf(x.id); return `
+      <button class="gp ${x.id === r.sel ? 'on' : ''} ${!isHost && x.id === myVote ? 'voted' : ''}" ${attr}="${x.id}" style="--gc:${x.color}">
+        ${vs.length ? `<span class="gpvotes">${vs.map((p) => esc(p.avatar)).join('')}</span>` : ''}
+        <span class="gpi">${x.icon}</span><b>${x.name}</b><small>${x.minPlayers === x.maxPlayers ? x.minPlayers : `${x.minPlayers}-${x.maxPlayers}`} 👤</small></button>`; }).join('')}</div>` : ''; }).join('');
+  const voteCount = Object.values(votes).filter((id) => id && r.players.some((p) => votes[p.pid] === id)).length;
   const picker = isHost ? `
     <details class="pickdd" ${S.pickOpen ? 'open' : ''}>
-      <summary><span class="gpi">${g.icon}</span><div class="grow"><small>Juego elegido</small><b>${g.name}</b></div><span class="ddbtn">🎮 Cambiar ▾</span></summary>
-    ${GAME_CATS.map(([cat, label]) => { const list = GAMES.filter((x) => (x.cat || 'mesa') === cat); return list.length ? `<div class="gpcat">${label}</div><div class="gamepick">${list.map((x) => `
-      <button class="gp ${x.id === r.sel ? 'on' : ''}" data-sel="${x.id}" style="--gc:${x.color}">
-        <span class="gpi">${x.icon}</span><b>${x.name}</b><small>${x.minPlayers === x.maxPlayers ? x.minPlayers : `${x.minPlayers}-${x.maxPlayers}`} 👤</small></button>`).join('')}</div>` : ''; }).join('')}
+      <summary><span class="gpi">${g.icon}</span><div class="grow"><small>Juego elegido${voteCount ? ` · 🙋 ${voteCount} ${voteCount === 1 ? 'petición' : 'peticiones'}` : ''}</small><b>${g.name}</b></div><span class="ddbtn">🎮 Cambiar ▾</span></summary>
+    ${voteCount ? '<p class="hint light center">🙋 Las caritas son los juegos que piden tus amigos</p>' : ''}
+    ${gameList('data-sel')}
     </details>
     <div class="optrow"><button class="btn small" data-rules="${g.id}">📖 Cómo se juega</button></div>
     ${(g.options || []).map((op) => {
@@ -762,16 +877,23 @@ function lobbyHTML() {
       if (op.type === 'bool') return `<div class="teamrow"><label class="switch" data-opt="${g.id}|${op.id}|0"><input type="checkbox" ${cur ? 'checked' : ''} disabled><span></span> ${op.label}</label></div>`;
       return `<div class="optchoice"><div class="optlabel">${op.label}</div><div class="chips">${op.choices.map((c, ci) => `<button class="chip ${c.v === cur ? 'on' : ''}" data-opt="${g.id}|${op.id}|${ci}">${c.label}</button>`).join('')}</div></div>`;
     }).join('')}
+    ${g.noFrenzy || g.realtime ? '' : `<div class="teamrow"><label class="switch" data-frenzy><input type="checkbox" ${r.frenzy ? 'checked' : ''} disabled><span></span> ⚡ Modo frenético: 30 segundos por jugada</label></div>`}
     ${g.teams ? `<div class="seg"><button class="${r.teamMode ? '' : 'on'}" data-mode="solo">👤 Cada uno por su cuenta</button><button class="${r.teamMode ? 'on' : ''}" data-mode="teams">🤝 Por equipos${g.teams === 'pairs4' ? ' (parejas)' : ''}</button></div>
       ${r.teamMode ? `${teamColumns(r, true)}<div class="row center"><button class="btn c3" data-a="shuffleteams">🎲 Sortear equipos</button></div><p class="hint light">Toca a un jugador para cambiarlo de equipo.</p>` : ''}` : ''}
     ${r.players.length < MAX_PLAYERS ? `<div class="row">${local ? '<button class="btn ghost" data-a="addlocal">➕ Añadir persona</button>' : ''}<button class="btn ghost" data-a="addbot">🤖 Añadir máquina</button></div>` : ''}
 `
-    : `${r.teamMode && g.teams ? teamColumns(r, false) : ''}<div class="card waiting"><div class="gpi big">${g.icon}</div><div>Juego elegido: <b>${g.name}</b>${r.teamMode ? ' · 🤝 por equipos' : ''}</div>
+    : `${r.teamMode && g.teams ? teamColumns(r, false) : ''}
+    <details class="pickdd" ${S.pickOpen ? 'open' : ''}>
+      <summary><span class="gpi">🎮</span><div class="grow"><small>${myVote ? `Has pedido: ${getGame(myVote).icon} ${getGame(myVote).name}` : '¿A qué quieres jugar?'}</small><b>Ver todos los juegos</b></div><span class="ddbtn">🙋 Pedir ▾</span></summary>
+      <p class="hint light center">Toca un juego para pedírselo al anfitrión. Él elige y empieza la partida.</p>
+      ${gameList('data-vote')}
+    </details>
+    <div class="card waiting"><div class="gpi big">${g.icon}</div><div>Juego elegido: <b>${g.name}</b>${r.teamMode ? ' · 🤝 por equipos' : ''}${r.frenzy && !g.noFrenzy && !g.realtime ? ' · ⚡ <b>frenético</b> (30 s por jugada)' : ''}</div>
       <div class="hint">${(g.options || []).map((op) => { const v = gameOptions(r, g)[op.id]; return op.type === 'bool' ? `${op.label}: ${v ? 'sí' : 'no'}` : `${op.label}: ${op.choices.find((c) => c.v === v)?.label}`; }).join(' · ')}</div>
       <button class="btn small" data-rules="${g.id}">📖 Cómo se juega</button><div class="dots">Esperando a que el anfitrión empiece<span>.</span><span>.</span><span>.</span></div></div>`;
 
   return `
-    <header class="topbar"><button class="iconbtn" data-a="leave">←</button><div class="grow title">${local ? '📱 En este móvil' : '🏠 Sala de espera'}</div>${local ? '' : '<button class="iconbtn" data-a="chat">💬</button>'}<button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button></header>
+    <header class="topbar"><button class="iconbtn" data-a="leave">←</button><div class="grow title">${local ? '📱 En este móvil' : '🏠 Sala de espera'}</div><button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button></header>
     ${S.reconnecting ? '<div class="reconnect">📡 Reconectando…</div>' : ''}
     <div class="lobby">
       ${startBar}
@@ -838,6 +960,15 @@ function makeCtx() {
   };
 }
 
+function fzHTML(r, g, s, demo) {
+  if (demo || !r.fz || !frenzyOn(r, g) || g.isOver(s)) return '';
+  const at = S.mode === 'client' ? S.fzAtLocal : fzAt;
+  const left = Math.max(0, at - Date.now());
+  const seat = mySeat();
+  const mine = S.mode === 'local' ? true : r.fz.seats.includes(seat);
+  return `<span class="fzpill ${mine ? 'mine' : ''}">⚡<b>${Math.ceil(left / 1000)}</b></span><i class="fzline ${mine ? 'mine' : ''}" style="animation-duration:${FRENZY_MS}ms;animation-delay:-${FRENZY_MS - left}ms"></i>`;
+}
+
 function renderGame(before) {
   if (!S.room || !S.room.state || !S.room.seats || !S.room.gameId) return; // ya no hay partida (p. ej. se volvió a la sala)
   const r = S.room, g = getGame(r.gameId), s = r.state;
@@ -856,8 +987,7 @@ function renderGame(before) {
     <header class="topbar" style="--gc:${g.color}">
       <button class="iconbtn" data-a="leave">✕</button>
       <div class="grow title">${g.icon} ${demo ? 'Ejemplo: ' : ''}${g.name}</div>
-      ${r.code ? `<span class="codepill">${r.code}</span>` : ''}
-      ${demo || S.mode === 'local' ? '' : '<button class="iconbtn" data-a="chat">💬</button>'}
+      ${fzHTML(r, g, s, demo)}${r.code && !(r.fz && !demo) ? `<span class="codepill">${r.code}</span>` : ''}
       ${demo ? '' : `<button class="iconbtn" data-rules="${g.id}">❓</button>`}
       <button class="iconbtn" data-a="mute">${sound.isMuted() ? '🔇' : '🔊'}</button>
     </header>
@@ -1003,22 +1133,6 @@ function renderModal() {
   } else if (m.type === 'asklobby') {
     d.innerHTML = `<div class="sheet"><div class="bigemoji">${esc(m.avatar)}</div><h3>${esc(m.name)} quiere volver a la sala</h3><div class="stack"><button class="btn big c3" data-tolobby>🏠 Volver todos a la sala</button><button class="btn big" data-close>🎮 Seguir jugando</button></div></div>`;
     d.querySelector('[data-tolobby]').onclick = () => { S.modal = null; d.remove(); backToLobby(); };
-  } else if (m.type === 'chat') {
-    const laughs = ['Jajaja 😂', 'JAJAJA 🤣', 'Jejeje 😏', 'Jiji 🤭', 'Muajaja 😈'];
-    const quick = ['¡Hola! 👋', '¡Bien jugado! 👏', '¡Te voy a ganar! 😎', '¡Qué suerte! 🍀', '¡Venga, que te toca! ⏰', '¡Nooo! 😱', '¡Toma ya! 💪', 'Jajaja 😂', '¡Gracias! 🙏', 'Uff… 😅', '¡Revancha! 🔁', '¡Buena partida! 🤝'];
-    const emos = ['😂', '😎', '😡', '😱', '👏', '🔥', '❤️', '🤞', '🥳', '😭', '🙈', '👍', '😴', '🤯', '💩', '🎉'];
-    d.innerHTML = `<div class="sheet chatsheet"><h3>💬 Chat</h3>
-      <div class="chatlog">${(S.chat || []).slice(-30).map((c) => `<div class="cmsg ${c.pid === me.pid ? 'mine' : ''}"><span>${esc(c.avatar)}</span><div><b>${esc(c.name)}</b>${esc(c.text)}</div></div>`).join('') || '<p class="hint center">Aún no hay mensajes</p>'}</div>
-      <div class="chips quick laughs">${laughs.map((q) => `<button class="chip" data-say="${esc(q)}">${esc(q)}</button>`).join('')}</div>
-      <div class="chips quick">${quick.map((q) => `<button class="chip" data-say="${esc(q)}">${esc(q)}</button>`).join('')}</div>
-      <div class="emogrid">${emos.map((e) => `<button data-say="${e}">${e}</button>`).join('')}</div>
-      <details class="typeit"><summary>✏️ Escribir otra cosa</summary><div class="row"><input id="chatin" maxlength="80" placeholder="Escribe un mensaje…"><button class="btn c2" data-send>Enviar</button></div></details>
-      <button class="btn" data-close>Cerrar</button></div>`;
-    const send = (t) => { sendChat(t); S.modal = null; d.remove(); };
-    d.querySelectorAll('[data-say]').forEach((b) => b.onclick = () => send(b.dataset.say));
-    d.querySelector('[data-send]').onclick = () => { const v = d.querySelector('#chatin').value.trim(); if (v) send(v); };
-    d.querySelector('#chatin').onkeydown = (e) => { if (e.key === 'Enter') d.querySelector('[data-send]').click(); };
-    const log = d.querySelector('.chatlog'); log.scrollTop = log.scrollHeight;
   }
   d.addEventListener('click', (e) => { if (e.target === d || e.target.closest('[data-close]')) { S.modal = null; d.remove(); } });
   document.body.appendChild(d);
@@ -1045,7 +1159,6 @@ function bind() {
       case 'uncurtain': S.curtainSeat = getGame(r.gameId).turnOf(r.state); render(); break;
       case 'demoagain': { const id = r.gameId; clearTimeout(S.demo.timer); startDemo(id); break; }
       case 'leave': if (S.screen === 'connecting' || S.mode === 'demo') leave(true); else { S.modal = { type: 'confirmleave' }; renderModal(); } break;
-      case 'chat': S.modal = { type: 'chat' }; renderModal(); break;
       case 'mute': sound.toggleMute(); el.textContent = sound.isMuted() ? '🔇' : '🔊'; break;
       case 'start': startGame(); break;
       case 'rematch': rematch(); break;
@@ -1104,6 +1217,7 @@ function bind() {
   if (tm) tm.onchange = () => { S.room.teamMode = tm.checked; if (tm.checked && !Object.keys(S.room.teams).length) S.room.players.forEach((p, i) => { S.room.teams[p.pid] = i % 2; }); broadcastRoom(); };
   on('[data-rules]', (el) => { S.modal = { type: 'rules', gameId: el.dataset.rules }; sound.play('click'); renderModal(); });
   on('[data-demo]', (el) => { sound.play('click'); startDemo(el.dataset.demo); });
+  on('[data-frenzy]', () => { S.room.frenzy = !S.room.frenzy; sound.play('click'); broadcastRoom(); if (S.room.frenzy) toast('⚡ Modo frenético: 30 segundos por jugada o mueve la máquina'); });
   on('[data-opt]', (el) => {
     const r = S.room; const [gid, oid, val] = el.dataset.opt.split('|');
     const op = getGame(gid).options.find((o) => o.id === oid);
@@ -1117,6 +1231,12 @@ function bind() {
     sound.play('click'); broadcastRoom();
   });
   on('[data-sel]', (el) => { S.room.sel = el.dataset.sel; S.pickOpen = false; sound.play('click'); broadcastRoom(); });
+  on('[data-vote]', (el) => {
+    const id = el.dataset.vote; sound.play('click'); S.pickOpen = false;
+    if (S.conn) S.conn.send({ t: 'vote', id });
+    S.room.votes = { ...(S.room.votes || {}), [me.pid]: id }; render();
+    toast(`🙋 Le has pedido ${getGame(id).icon} ${getGame(id).name} al anfitrión`);
+  });
   const dd = app.querySelector('.pickdd'); if (dd) dd.addEventListener('toggle', () => { S.pickOpen = dd.open; });
   on('[data-team]', (el) => { const r = S.room; const pid = el.dataset.team; r.teams[pid] = ((r.teams[pid] ?? 0) + 1) % (r.players.length >= 6 ? 3 : 2); sound.play('click'); broadcastRoom(); });
   on('[data-delwish]', (el) => { wishlist.splice(+el.dataset.delwish, 1); LS.set('wishlist', wishlist); render(); });

@@ -54,6 +54,7 @@ function scoreRound(s) {
 
 export default {
   id: 'stop',
+  noFrenzy: true, // ya tiene su propio reloj o se juega a la vez
   name: '¡Stop!',
   icon: '✋',
   color: '#e8590c',

@@ -261,7 +261,7 @@ const RT = {
       b.addEventListener('contextmenu', (e) => e.preventDefault());
     });
     const KEYMAP = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'gas', ArrowDown: 'brake', a: 'left', d: 'right', w: 'gas', s: 'brake' };
-    const kd = (e) => { if (KEYMAP[e.key] && el.isConnected) { keys[KEYMAP[e.key]] = 1; sync(); e.preventDefault(); } };
+    const kd = (e) => { if (e.target && e.target.tagName === 'INPUT') return; if (KEYMAP[e.key] && el.isConnected) { keys[KEYMAP[e.key]] = 1; sync(); e.preventDefault(); } };
     const ku = (e) => { if (KEYMAP[e.key]) { keys[KEYMAP[e.key]] = 0; sync(); } };
     addEventListener('keydown', kd); addEventListener('keyup', ku);
     const resend = setInterval(() => { if (!el.isConnected) { clearInterval(resend); return; } ctx.sendInput({ ...input }); }, 400);

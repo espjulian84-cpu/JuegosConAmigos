@@ -37,6 +37,7 @@ function endTurn(s, why) {
 
 export default {
   id: 'dibuja',
+  noFrenzy: true, // ya tiene su propio reloj o se juega a la vez
   name: 'Dibuja y adivina',
   icon: '🎨',
   color: '#d6336c',

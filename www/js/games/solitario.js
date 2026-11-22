@@ -64,6 +64,7 @@ function validMove(p, m) {
 
 export default {
   id: 'solitario',
+  noFrenzy: true, // ya tiene su propio reloj o se juega a la vez
   name: 'Solitario',
   icon: '🂡',
   color: '#2b8a3e',
