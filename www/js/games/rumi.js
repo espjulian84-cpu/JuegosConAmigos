@@ -261,7 +261,7 @@ export default {
     const groups = W.table.map((g, i) => {
       const an = analyze(g, T);
       const shown = an.ok ? an.order : g;
-      return `<div class="rset ${an.ok ? 'ok' : 'bad'} ${myTurn && ui.sel.length ? 'target' : ''}" data-set="${i}">${shown.map((id) => tileHTML(id, 't')).join('')}${!an.ok ? '<i class="rbad">✖</i>' : ''}${myTurn && ui.sel.length && !g.every((id) => ui.sel.includes(id)) ? '<button class="rdrop" data-drop>⬇️ aquí</button>' : ''}</div>`;
+      return `<div class="rset ${an.ok ? 'ok' : 'bad'} ${myTurn && ui.sel.length ? 'target' : ''}" data-set="${i}" style="--n:${Math.max(g.length, 3)}">${shown.map((id) => tileHTML(id, 't')).join('')}${!an.ok ? '<i class="rbad">✖</i>' : ''}${myTurn && ui.sel.length && !g.every((id) => ui.sel.includes(id)) ? '<button class="rdrop" data-drop>⬇️ aquí</button>' : ''}</div>`;
     }).join('');
     const placed = W.table.flat().filter((id) => myRack.has(id));
     const allOk = W.table.every((g) => !g.length || analyze(g, T).ok);

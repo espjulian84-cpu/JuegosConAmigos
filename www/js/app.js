@@ -1005,6 +1005,7 @@ function renderGame(before) {
     g.render(board, ctx.state, ctx);
     decorateTeams(board, ctx.state, g);
     const skip = (S.pendingFx && S.pendingFx.f.noFlip) || [];
+    updateTimerBars(); // que la barra no se vacíe un instante al redibujar
     fx.animateFrom(board, before, skip);
     runPendingFx(board);
   } else S.pendingFx = null;
@@ -1033,7 +1034,8 @@ function decorateTeams(board, s, g) {
 }
 
 // barras de tiempo ([data-timer]) que dibujan los juegos
-setInterval(() => {
+setInterval(updateTimerBars, 150);
+function updateTimerBars() {
   const els = document.querySelectorAll('[data-timer]');
   if (!els.length) return;
   const t = S.room && S.room.state && S.room.state.timer;
@@ -1044,7 +1046,7 @@ setInterval(() => {
     el.dataset.secs = Math.ceil(left / 1000);
     el.classList.toggle('hurry', left < 4000);
   });
-}, 150);
+}
 
 // ======================================================================
 //  PARTIDA DE EJEMPLO (instrucciones animadas)
@@ -1258,4 +1260,4 @@ window.addEventListener('popstate', () => {
 // Enlace de invitación (?sala=CODE): ir directo a unirse
 render();
 if (params.get('sala') && me.name && !TEST) joinRoom(params.get('sala'));
-window.__jca = { S, me, doAction }; // para depurar y para las pruebas automáticas
+window.__jca = { S, me, doAction, broadcastRoom }; // para depurar y para las pruebas automáticas
