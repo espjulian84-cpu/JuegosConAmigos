@@ -48,6 +48,21 @@ jobs:
           npx cap sync android
           # firma fija para que cada APK nuevo actualice al anterior sin desinstalar
           mkdir -p ~/.android && cp keystore/debug.keystore ~/.android/debug.keystore
+          # y además se indica a Gradle explícitamente (si no, a veces genera una clave nueva en cada compilación)
+          cat >> android/app/build.gradle <<'GRADLE'
+
+          android {
+              signingConfigs {
+                  debug {
+                      storeFile rootProject.file('../keystore/debug.keystore')
+                      storePassword 'android'
+                      keyAlias 'androiddebugkey'
+                      keyPassword 'android'
+                  }
+              }
+              buildTypes { debug { signingConfig signingConfigs.debug } }
+          }
+          GRADLE
 
       - name: Compilar APK
         working-directory: android
@@ -55,6 +70,9 @@ jobs:
 
       - name: Renombrar APK
         run: |
+          # comprobar que la APK lleva la firma fija (si no, el móvil no deja actualizar)
+          $ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)/apksigner verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | tee firma.txt
+          grep -qi "bff2c8788d0be25281df3dd26fe0f889207b00ba6d73719df2dc59cf67ce7d99" firma.txt
           cp android/app/build/outputs/apk/debug/app-debug.apk JuegosConAmigos.apk
           cp android/app/build/outputs/apk/debug/app-debug.apk JuegosConAmigos-1.0.${{ github.run_number }}.apk
 
