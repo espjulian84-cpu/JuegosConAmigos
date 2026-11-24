@@ -4,7 +4,7 @@ import { clone, esc, fail, pushLog, PLAYER_COLORS, TEAM_COLORS, TEAM_NAMES } fro
 // 2 casillas en horizontal/vertical (pueden girar), y después levantan un muro a su lado.
 // Variante "formas": fichas CUADRADAS y REDONDAS:
 //  ■ cuadrada: como la torre, 1 o 2 casillas en línea recta.
-//  ● redonda: en "L corta", una casilla hacia un lado y otra girando (acaba en diagonal).
+//  ● redonda: una casilla recta, o una recta y otra girando (la diagonal no es obligatoria).
 // Ambas pueden quedarse quietas. Después de mover se levanta un muro en un lado de esa ficha.
 // Opción "rompe-muros": una vez por partida puedes derribar un muro pegado a una de tus fichas.
 // Acaba cuando cada zona cerrada solo tiene fichas de un bando. Gana quien encierre más casillas.
@@ -45,6 +45,7 @@ export function reach(s, p) {
       const b = step(s, a.r, a.c, d);
       if (b) out.push(b);
     } else {
+      out.push(a); // la redonda también puede quedarse en la primera casilla: la L no es obligatoria
       for (const d2 of PERP[d]) { const b = step(s, a.r, a.c, d2); if (b) out.push(b); }
     }
   }
@@ -194,12 +195,12 @@ export default {
     <p>🎯 <b>Objetivo: quedarte con el mayor espacio.</b> Tablero de 7×7; cada jugador tiene <b>2 fichas</b> de su color (<b>1</b> si sois 4; por equipos, el equipo comparte color).</p>
     <ol>
       <li><b>Colocación:</b> por turnos, cada uno pone sus fichas donde quiera.</li>
-      <li><b>En tu turno</b> mueves UNA ficha <b>0, 1 o 2 casillas</b> en horizontal o vertical (puedes girar en la segunda) y después levantas un <b>muro</b> en uno de sus 4 lados.</li>
+      <li><b>En tu turno</b> mueves UNA ficha: <b>1 casilla recta, 2 rectas, o una recta y otra al lado</b> (como quieras, la diagonal no es obligatoria) y después levantas un <b>muro</b> en uno de sus 4 lados.</li>
       <li>No se atraviesan muros ni fichas. Puedes dejar la ficha quieta y solo poner el muro.</li>
       <li>Los muros van partiendo el tablero en <b>zonas</b>. Una zona en la que solo hay fichas tuyas es <b>tuya</b> y se pinta de tu color.</li>
       <li>La partida acaba cuando <b>ninguna zona comparte fichas de bandos distintos</b>. Cada uno suma las casillas de sus zonas: <b>gana quien tenga más espacio</b> (si empatan, quien tenga la zona más grande).</li>
     </ol>
-    <p><b>Opciones:</b> «■● Cuadradas y redondas» (la cuadrada va recta 1 o 2 como la torre; la redonda en L corta) y «💥 Rompe-muros» (una vez por partida derribas un muro pegado a tu ficha).</p>`,
+    <p><b>Opciones:</b> «■● Cuadradas y redondas» (la cuadrada va recta 1 o 2 como la torre; la redonda una recta, o una recta y otra al lado) y «💥 Rompe-muros» (una vez por partida derribas un muro pegado a tu ficha).</p>`,
 
   setup(n, opts = {}) {
     const o0 = opts.options || {};
@@ -246,7 +247,7 @@ export default {
       if (s.phase !== 'move') fail('Ahora no toca mover');
       const p = s.pieces[seat][a.i];
       if (!p) fail('Ficha no válida');
-      if (!reach(s, p).some((q) => q.r === a.r && q.c === a.c)) fail(p.t === 'any' ? 'Hasta 2 casillas, sin cruzar muros ni fichas' : p.t === 'sq' ? 'La cuadrada va recta, 1 o 2 casillas' : 'La redonda va en L: una y otra al lado');
+      if (!reach(s, p).some((q) => q.r === a.r && q.c === a.c)) fail(p.t === 'any' ? 'Hasta 2 casillas, sin cruzar muros ni fichas' : p.t === 'sq' ? 'La cuadrada va recta, 1 o 2 casillas' : 'La redonda va una recta, o una recta y otra al lado');
       if (!freeSides(s, a.r, a.c).length) fail('Desde ahí no puedes poner ningún muro');
       s.active = { i: a.i, from: { r: p.r, c: p.c } };
       p.r = a.r; p.c = a.c;
@@ -319,7 +320,7 @@ export default {
         { say: 'Ana coloca su redonda.', seat: 0, a: { type: 'place', r: 5, c: 2 } },
         { say: '■ La cuadrada va recta, 1 o 2 casillas, como la torre.', seat: 0, a: { type: 'move', i: 0, r: 3, c: 3 } },
         { say: 'Después de mover, levantas un muro en un lado de esa ficha.', seat: 0, a: { type: 'wall', side: 'E' } },
-        { say: '● La redonda va en L: una hacia delante y otra al lado.', seat: 1, a: { type: 'move', i: 1, r: 2, c: 3 } },
+        { say: '● La redonda puede ir una recta, o una recta y otra al lado.', seat: 1, a: { type: 'move', i: 1, r: 2, c: 3 } },
         { say: 'Leo pone su muro justo encima de Ana.', seat: 1, a: { type: 'wall', side: 'S' } },
         { say: '💥 ¡Rompe-muros! Solo una vez por partida: Ana derriba el muro que la encerraba.', seat: 0, a: { type: 'break', key: 'h2_3' } },
         { say: 'Y sigue su turno normal: mueve y construye.', seat: 0, a: { type: 'move', i: 1, r: 4, c: 3 } },
@@ -391,7 +392,7 @@ export default {
     else if (!myTurn) status = `Turno de <b>${esc(ctx.players[s.turn])}</b>`;
     else if (s.phase === 'place') status = s.mode === 'orig' ? '👉 Coloca una ficha en una casilla libre' : `👉 Coloca tu ficha ${typeOf(s.pieces[me].length, s) === 'sq' ? '■ cuadrada' : '● redonda'} en una casilla libre`;
     else if (ui.breaking) status = '💥 Toca un muro rojo pegado a tus fichas para derribarlo';
-    else if (s.phase === 'move') status = ui.sel == null ? '👉 Elige una de tus fichas' : (s.pieces[me][ui.sel].t === 'any' ? '👣 Hasta 2 casillas, puedes girar (o quieto: tócala otra vez)' : s.pieces[me][ui.sel].t === 'sq' ? '■ Recto 1 o 2 casillas (o quieto: tócala otra vez)' : '● En L: una y otra al lado (o quieto: tócala otra vez)');
+    else if (s.phase === 'move') status = ui.sel == null ? '👉 Elige una de tus fichas' : (s.pieces[me][ui.sel].t === 'any' ? '👣 1 o 2 rectas, o una recta y otra al lado (o quieto: tócala otra vez)' : s.pieces[me][ui.sel].t === 'sq' ? '■ Recto 1 o 2 casillas (o quieto: tócala otra vez)' : '● Una recta, o una recta y otra al lado (o quieto: tócala otra vez)');
     else status = '🧱 Toca un lado brillante para levantar el muro';
 
     const actions = [];

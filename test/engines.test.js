@@ -110,6 +110,6 @@ assert.throws(() => oca.action(oca.setup(2), 1, { type: 'roll' }), GameError, 'n
   const sq = reach(s, s.pieces[0][0]).map((q) => `${q.r},${q.c}`).sort();
   assert.deepEqual(sq, ['1,3', '2,3', '3,1', '3,2', '3,3', '3,4', '3,5', '4,3', '5,3'].sort());
   const rd = reach(s, { r: 3, c: 3, t: 'rd' }).map((q) => `${q.r},${q.c}`).sort();
-  assert.deepEqual(rd, ['2,2', '2,4', '3,3', '4,2', '4,4'].sort());
+  assert.deepEqual(rd, ['2,2', '2,3', '2,4', '3,2', '3,3', '3,4', '4,2', '4,3', '4,4'].sort()); // recta o recta + lado
 }
 console.log(`✅ ${total} partidas simuladas de ${GAMES.length} juegos sin errores; ejemplos, reglas e información oculta comprobados`);
