@@ -1,6 +1,8 @@
 import { clone, esc, fail, pushLog, PLAYER_COLORS, TEAM_COLORS, TEAM_NAMES } from '../util.js';
 
-// Tablero 7x7. Cada jugador tiene fichas CUADRADAS y REDONDAS:
+// Tablero 7x7. Reglas originales (por defecto): todas las fichas iguales, se mueven hasta
+// 2 casillas en horizontal/vertical (pueden girar), y después levantan un muro a su lado.
+// Variante "formas": fichas CUADRADAS y REDONDAS:
 //  ■ cuadrada: como la torre, 1 o 2 casillas en línea recta.
 //  ● redonda: en "L corta", una casilla hacia un lado y otra girando (acaba en diagonal).
 // Ambas pueden quedarse quietas. Después de mover se levanta un muro en un lado de esa ficha.
@@ -27,7 +29,7 @@ function step(s, r, c, d) {
   if (s.walls[wallKey(r, c, d)] || occupied(s, nr, nc)) return null;
   return { r: nr, c: nc };
 }
-export const typeOf = (k) => (k % 2 === 0 ? 'sq' : 'rd');
+export const typeOf = (k, s) => (s && s.mode === 'orig' ? 'any' : k % 2 === 0 ? 'sq' : 'rd');
 
 /** Casillas a las que puede ir una ficha (incluye quedarse quieta) */
 export function reach(s, p) {
@@ -35,7 +37,10 @@ export function reach(s, p) {
   for (const d of Object.keys(DIRS)) {
     const a = step(s, p.r, p.c, d);
     if (!a) continue;
-    if (p.t === 'sq') {
+    if (p.t === 'any') {
+      out.push(a);
+      for (const d2 of Object.keys(DIRS)) { const b = step(s, a.r, a.c, d2); if (b) out.push(b); }
+    } else if (p.t === 'sq') {
       out.push(a);
       const b = step(s, a.r, a.c, d);
       if (b) out.push(b);
@@ -94,6 +99,56 @@ export function scoreOf(s) {
   return { score, best, done, regions: list.length, list };
 }
 
+// Cuánto espacio "controla" cada bando: casillas a las que llega antes que nadie (sin cruzar muros).
+// Las zonas ya cerradas cuentan enteras para su dueño. Es lo que usa la máquina para jugar a por espacio.
+export function territory(s) {
+  const units = s.teams ? Math.max(...s.teams) + 1 : s.n;
+  const dist = Array.from({ length: units }, () => Array(N * N).fill(99));
+  s.pieces.forEach((ps, seat) => {
+    const u = unitOf(s, seat), D = dist[u], q = [];
+    ps.forEach((p) => { D[p.r * N + p.c] = 0; q.push(p.r * N + p.c); });
+    for (let i = 0; i < q.length; i++) {
+      const x = q[i], r = (x / N) | 0, c = x % N;
+      for (const [d, [dr, dc]] of Object.entries(DIRS)) {
+        const nr = r + dr, nc = c + dc;
+        if (nr < 0 || nc < 0 || nr >= N || nc >= N || s.walls[wallKey(r, c, d)]) continue;
+        const y = nr * N + nc;
+        if (D[y] > D[x] + 1) { D[y] = D[x] + 1; q.push(y); }
+      }
+    }
+  });
+  const t = Array(units).fill(0);
+  for (let x = 0; x < N * N; x++) {
+    let best = 99, who = -1;
+    for (let u = 0; u < units; u++) { if (dist[u][x] < best) { best = dist[u][x]; who = u; } else if (dist[u][x] === best) who = -1; }
+    if (who >= 0 && best < 99) t[who]++;
+  }
+  return t;
+}
+function evalFor(s, seat) {
+  const t = territory(s), u = unitOf(s, seat);
+  const sc = scoreOf(s).score;
+  const others = t.map((v, k) => (k === u ? -1 : v + sc[k] * 0.5));
+  return t[u] + sc[u] * 0.5 - Math.max(...others) * 0.9;
+}
+function bestPlay(s, seat, onlyPiece) {
+  let best = null, bv = -1e9;
+  s.pieces[seat].forEach((p, i) => {
+    if (onlyPiece != null && i !== onlyPiece) return;
+    const targets = onlyPiece != null ? [{ r: p.r, c: p.c }] : reach(s, p);
+    for (const q of targets) {
+      const sides = freeSides({ ...s, pieces: s.pieces.map((ps, k) => (k === seat ? ps.map((x, j) => (j === i ? { ...x, r: q.r, c: q.c } : x)) : ps)) }, q.r, q.c);
+      for (const side of sides) {
+        const pieces = s.pieces.map((ps, k) => (k === seat ? ps.map((x, j) => (j === i ? { ...x, r: q.r, c: q.c } : x)) : ps));
+        const walls = { ...s.walls, [wallKey(q.r, q.c, side)]: { seat, unit: unitOf(s, seat) } };
+        const v = evalFor({ ...s, pieces, walls }, seat) + Math.random() * 0.6;
+        if (v > bv) { bv = v; best = { i, r: q.r, c: q.c, side }; }
+      }
+    }
+  });
+  return best;
+}
+
 const canAct = (s, seat) => s.pieces[seat].some((p) => reach(s, p).some((q) => freeSides(s, q.r, q.c).length));
 
 function finish(s) {
@@ -129,29 +184,33 @@ export default {
   minPlayers: 2,
   maxPlayers: 4,
   teams: 'even',
-  blurb: 'Estrategia pura: mueve tus fichas (la cuadrada como la torre, la redonda en L) y levanta muros. Encierra el territorio más grande.',
-  options: [{ id: 'breaker', label: '💥 Rompe-muros (1 por jugador)', type: 'bool', def: true }],
+  blurb: 'Estrategia pura: mueve tus fichas hasta 2 casillas y levanta un muro. Gana quien se quede con el mayor espacio cerrado.',
+  options: [
+    { id: 'mode', label: '📜 Reglas', type: 'choice', def: 'orig', choices: [{ v: 'orig', label: '🧱 Originales' }, { v: 'formas', label: '■● Cuadradas y redondas' }] },
+    { id: 'per', label: '♟️ Fichas por jugador', type: 'choice', def: 0, choices: [{ v: 0, label: 'Automático (2, o 1 si sois 4)' }, { v: 1, label: '1' }, { v: 2, label: '2' }, { v: 3, label: '3' }] },
+    { id: 'breaker', label: '💥 Rompe-muros (1 por jugador)', type: 'bool', def: false },
+  ],
   rules: `
-    <p>Tablero de 7×7. Cada jugador tiene fichas <b>■ cuadradas</b> y <b>● redondas</b> de su color (por equipos, el equipo comparte color).</p>
+    <p>🎯 <b>Objetivo: quedarte con el mayor espacio.</b> Tablero de 7×7; cada jugador tiene <b>2 fichas</b> de su color (<b>1</b> si sois 4; por equipos, el equipo comparte color).</p>
     <ol>
       <li><b>Colocación:</b> por turnos, cada uno pone sus fichas donde quiera.</li>
-      <li><b>En tu turno</b> mueves UNA ficha y después levantas un muro en uno de sus 4 lados.</li>
-      <li><b>■ Cuadrada:</b> como la torre del ajedrez pero solo 1 o 2 casillas en línea recta.</li>
-      <li><b>● Redonda:</b> una casilla hacia delante y otra hacia el lado que quieras (una "L" corta, acaba en diagonal).</li>
-      <li>Puedes dejar la ficha quieta y solo poner el muro. No se atraviesan muros ni fichas.</li>
-      <li><b>💥 Rompe-muros</b> (si está activado): una vez en toda la partida puedes derribar un muro pegado a una de tus fichas antes de mover.</li>
-      <li>La partida acaba cuando todas las zonas cerradas tienen fichas de un solo bando. <b>Gana quien encierre más casillas.</b></li>
-    </ol>`,
+      <li><b>En tu turno</b> mueves UNA ficha <b>0, 1 o 2 casillas</b> en horizontal o vertical (puedes girar en la segunda) y después levantas un <b>muro</b> en uno de sus 4 lados.</li>
+      <li>No se atraviesan muros ni fichas. Puedes dejar la ficha quieta y solo poner el muro.</li>
+      <li>Los muros van partiendo el tablero en <b>zonas</b>. Una zona en la que solo hay fichas tuyas es <b>tuya</b> y se pinta de tu color.</li>
+      <li>La partida acaba cuando <b>ninguna zona comparte fichas de bandos distintos</b>. Cada uno suma las casillas de sus zonas: <b>gana quien tenga más espacio</b> (si empatan, quien tenga la zona más grande).</li>
+    </ol>
+    <p><b>Opciones:</b> «■● Cuadradas y redondas» (la cuadrada va recta 1 o 2 como la torre; la redonda en L corta) y «💥 Rompe-muros» (una vez por partida derribas un muro pegado a tu ficha).</p>`,
 
   setup(n, opts = {}) {
-    const per = n === 2 ? 4 : n === 3 ? 3 : 2;
+    const o0 = opts.options || {};
+    const per = o0.per > 0 ? o0.per : n >= 4 ? 1 : 2; // pocas fichas: el tablero es pequeño
     const order = [];
     for (let k = 0; k < per; k++) for (let j = 0; j < n; j++) order.push(k % 2 ? n - 1 - j : j);
     const o = opts.options || {};
     return {
       n, per, pieces: Array.from({ length: n }, () => []), walls: {}, phase: 'place', order, oi: 0, turn: order[0],
       active: null, v: 0, log: ['Colocad vuestras fichas por turnos'], teams: opts.teams || null,
-      breaker: o.breaker !== false, usedBreak: Array(n).fill(false),
+      breaker: !!o.breaker, usedBreak: Array(n).fill(false), mode: o.mode === 'formas' ? 'formas' : 'orig',
     };
   },
   turnOf: (s) => (s.over ? null : s.turn),
@@ -167,7 +226,7 @@ export default {
     if (a.type === 'place') {
       if (s.phase !== 'place') fail('Ya no se colocan fichas');
       if (!(a.r >= 0 && a.r < N && a.c >= 0 && a.c < N) || occupied(s, a.r, a.c)) fail('Casilla no válida');
-      s.pieces[seat].push({ r: a.r, c: a.c, t: typeOf(s.pieces[seat].length) });
+      s.pieces[seat].push({ r: a.r, c: a.c, t: typeOf(s.pieces[seat].length, s) });
       s.oi++;
       if (s.oi >= s.order.length) { s.phase = 'move'; s.turn = 0; pushLog(s, '¡A construir muros!'); if (!canAct(s, 0)) endTurn(s); }
       else s.turn = s.order[s.oi];
@@ -187,7 +246,7 @@ export default {
       if (s.phase !== 'move') fail('Ahora no toca mover');
       const p = s.pieces[seat][a.i];
       if (!p) fail('Ficha no válida');
-      if (!reach(s, p).some((q) => q.r === a.r && q.c === a.c)) fail(p.t === 'sq' ? 'La cuadrada va recta, 1 o 2 casillas' : 'La redonda va en L: una y otra al lado');
+      if (!reach(s, p).some((q) => q.r === a.r && q.c === a.c)) fail(p.t === 'any' ? 'Hasta 2 casillas, sin cruzar muros ni fichas' : p.t === 'sq' ? 'La cuadrada va recta, 1 o 2 casillas' : 'La redonda va en L: una y otra al lado');
       if (!freeSides(s, a.r, a.c).length) fail('Desde ahí no puedes poner ningún muro');
       s.active = { i: a.i, from: { r: p.r, c: p.c } };
       p.r = a.r; p.c = a.c;
@@ -228,21 +287,28 @@ export default {
 
   bot(s, seat) {
     if (s.phase === 'place') {
-      for (let k = 0; k < 200; k++) { const r = (Math.random() * N) | 0, c = (Math.random() * N) | 0; if (!occupied(s, r, c)) return { type: 'place', r, c }; }
+      let best = null, bv = -1e9;
+      for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+        if (occupied(s, r, c)) continue;
+        const pieces = s.pieces.map((ps, k) => (k === seat ? [...ps, { r, c, t: 'any' }] : ps));
+        const v = evalFor({ ...s, pieces }, seat) + Math.random() * 1.5;
+        if (v > bv) { bv = v; best = { type: 'place', r, c }; }
+      }
+      return best;
     }
     if (s.phase === 'move') {
-      const opts = [];
-      s.pieces[seat].forEach((p, i) => reach(s, p).forEach((q) => { if (freeSides(s, q.r, q.c).length) opts.push({ type: 'move', i, r: q.r, c: q.c }); }));
-      return opts[(Math.random() * opts.length) | 0];
+      const b = bestPlay(s, seat);
+      return b && { type: 'move', i: b.i, r: b.r, c: b.c };
     }
+    const b = bestPlay(s, seat, s.active.i);
+    if (b) return { type: 'wall', side: b.side };
     const p = s.pieces[seat][s.active.i];
-    const f = freeSides(s, p.r, p.c);
-    return { type: 'wall', side: f[(Math.random() * f.length) | 0] };
+    return { type: 'wall', side: freeSides(s, p.r, p.c)[0] };
   },
 
   demo() {
     // Partida corta de ejemplo (2 jugadores, 2 fichas cada uno para que sea rápida)
-    const s = this.setup(2, { options: { breaker: true } });
+    const s = this.setup(2, { options: { breaker: true, mode: 'formas' } });
     s.per = 2; s.order = [0, 1, 1, 0];
     return {
       state: s,
@@ -298,7 +364,7 @@ export default {
       parts.push(`<g transform="translate(${p.c * S + 50},${p.r * S + 50})"><g class="mpiece ${can ? 'can' : ''} ${isSel ? 'sel' : ''}" data-flip="m${seat}-${i}" ${can ? `data-piece="${i}"` : ''}>${pieceSVG(p.t, colorOf(seat), mateIdx(seat))}</g></g>`);
     }));
     if (s.phase === 'place' && myTurn) {
-      const t = typeOf(s.pieces[me].length);
+      const t = typeOf(s.pieces[me].length, s);
       parts.push(`<g opacity=".0" id="placeghost">${pieceSVG(t, colorOf(me), mateIdx(me))}</g>`);
     }
     if (myTurn && s.phase === 'wall') {
@@ -317,15 +383,15 @@ export default {
       const brkIcon = s.breaker ? seats.map((k) => (s.usedBreak[k] ? '' : '💥')).join('') : '';
       return `<div class="pchip ${seats.includes(s.turn) && !s.over ? 'turn' : ''}" style="--pc:${unitColor(u)}">
         <span class="avatar">${seats.map((k) => ctx.avatar(k)).join('')}</span>
-        <span class="pname">${label}</span><span class="pinfo">🏰 ${(s.final || sc.score)[u]} ${brkIcon}</span></div>`;
+        <span class="pname">${label}</span><span class="pinfo">🏰 ${(s.final || sc.score)[u]}${s.over ? ' casillas' : ''} ${brkIcon}</span></div>`;
     }).join('');
 
     let status;
-    if (s.over) status = s.winnerUnits.length > 1 ? '🤝 ¡Empate!' : `🏆 ¡Gana ${ctx.winnerName(s.winner)}!`;
+    if (s.over) status = (s.winnerUnits.length > 1 ? '🤝 ¡Empate!' : `🏆 ¡Gana ${ctx.winnerName(s.winner)}!`) + ' <small>(más espacio cerrado)</small>';
     else if (!myTurn) status = `Turno de <b>${esc(ctx.players[s.turn])}</b>`;
-    else if (s.phase === 'place') status = `👉 Coloca tu ficha ${typeOf(s.pieces[me].length) === 'sq' ? '■ cuadrada' : '● redonda'} en una casilla libre`;
+    else if (s.phase === 'place') status = s.mode === 'orig' ? '👉 Coloca una ficha en una casilla libre' : `👉 Coloca tu ficha ${typeOf(s.pieces[me].length, s) === 'sq' ? '■ cuadrada' : '● redonda'} en una casilla libre`;
     else if (ui.breaking) status = '💥 Toca un muro rojo pegado a tus fichas para derribarlo';
-    else if (s.phase === 'move') status = ui.sel == null ? '👉 Elige una de tus fichas' : (s.pieces[me][ui.sel].t === 'sq' ? '■ Recto 1 o 2 casillas (o quieto: tócala otra vez)' : '● En L: una y otra al lado (o quieto: tócala otra vez)');
+    else if (s.phase === 'move') status = ui.sel == null ? '👉 Elige una de tus fichas' : (s.pieces[me][ui.sel].t === 'any' ? '👣 Hasta 2 casillas, puedes girar (o quieto: tócala otra vez)' : s.pieces[me][ui.sel].t === 'sq' ? '■ Recto 1 o 2 casillas (o quieto: tócala otra vez)' : '● En L: una y otra al lado (o quieto: tócala otra vez)');
     else status = '🧱 Toca un lado brillante para levantar el muro';
 
     const actions = [];
@@ -335,6 +401,7 @@ export default {
     el.innerHTML = `
       <div class="players">${players}</div>
       <div class="status">${status}</div>
+      ${s.over ? '' : '<div class="hint light center murgoal">🎯 Gana quien se quede con <b>más espacio cerrado</b> 🏰</div>'}
       <div class="muros-wrap"><svg class="muros" viewBox="-12 -12 724 724">
         <defs><pattern id="wood" width="40" height="40" patternUnits="userSpaceOnUse"><rect width="40" height="40" fill="#6d4c41"/><path d="M0 10 Q20 5 40 12 M0 28 Q20 24 40 30" stroke="#5d4037" stroke-width="3" fill="none"/></pattern></defs>
         <rect x="-12" y="-12" width="724" height="724" rx="28" fill="url(#wood)"/>${parts.join('')}</svg></div>

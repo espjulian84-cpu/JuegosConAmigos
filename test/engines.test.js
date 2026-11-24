@@ -50,7 +50,7 @@ for (const g of GAMES) {
   const optSets = [{}];
   (g.options || []).forEach((op) => { if (op.type === 'choice') op.choices.forEach((c) => optSets.push({ [op.id]: c.v })); else optSets.push({ [op.id]: !op.def }); });
   for (let n = g.minPlayers; n <= g.maxPlayers; n++) {
-    const reps = g.realtime ? 3 : ({ ajedrez: 2, poker: 4, damas: 6, cuatro: 10, tres: 20 }[g.id] ?? 60);
+    const reps = g.realtime ? 3 : ({ ajedrez: 2, poker: 4, damas: 6, cuatro: 10, tres: 20, muros: 6 }[g.id] ?? 60);
     for (let k = 0; k < reps; k++) { const s = play(g, n, null, optSets[k % optSets.length]); assert.ok(s.winner != null, `${g.id} sin ganador`); total++; }
   }
   if (g.teams) for (let k = 0; k < 60; k++) { play(g, 4, [0, 1, 0, 1], {}); total++; }
